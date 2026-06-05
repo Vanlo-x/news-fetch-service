@@ -14,6 +14,12 @@
 
 第一阶段不实现真实新闻获取。
 
+当前项目包根为：
+
+```text
+com.vanlo.newsfetch
+```
+
 ## 3. 服务边界
 
 ### 负责
@@ -21,7 +27,7 @@
 * 加载可配置新闻来源
 * 拉取新闻原始数据
 * 解析 RSS / API / HTML 来源
-* 标准化为统一 NewsItem
+* 标准化为统一 `NewsItem`
 * 基础去重
 * 失败重试
 * 来源级 fallback
@@ -36,7 +42,7 @@
 * 用户偏好
 * 推送通知
 * 前端页面
-* 新闻最终排版
+* 新闻最终排序
 * 绕过反爬、验证码、登录或付费墙
 
 ## 4. 技术栈
@@ -150,13 +156,13 @@ occurredAt
 
 返回服务健康状态。
 
-第一阶段需要实现。
+第一阶段已实现。
 
 ### POST /v1/news/fetch
 
 获取新闻数据。
 
-第一阶段只定义 DTO，不实现真实获取。
+当前阶段只提供占位接口和 DTO，返回空结果，不实现真实获取。
 
 ### GET /v1/sources/status
 
@@ -176,7 +182,7 @@ occurredAt
 
 1. 单来源失败不影响整体请求。
 2. 单来源失败后执行 retry。
-3. retry 后失败则尝试 fallbackSourceIds。
+3. retry 后失败则尝试 `fallbackSourceIds`。
 4. 仍失败则读取未过期缓存。
 5. 调用方允许时可返回过期缓存。
 6. 所有降级结果必须明确标记。
@@ -201,6 +207,7 @@ occurredAt
 * `./mvnw test` 或 `mvn test` 通过。
 * `./mvnw spring-boot:run` 或 `mvn spring-boot:run` 可以启动服务。
 * `GET /health` 返回 ok。
+* `POST /v1/news/fetch` 返回空结果占位响应。
 * 项目目录结构清晰。
 * 存在基础 domain model。
 * 存在基础 DTO。

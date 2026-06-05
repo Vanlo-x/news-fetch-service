@@ -1,0 +1,136 @@
+openapi: 3.0.3
+info:
+  title: news-fetch-service API
+  version: 0.0.1
+  description: Initial API skeleton for news-fetch-service.
+paths:
+  /health:
+    get:
+      summary: Service health check
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v1/news/fetch:
+    post:
+      summary: Placeholder news fetch endpoint
+      description: Returns an empty placeholder response. Real news fetching is not implemented in this milestone.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FetchNewsRequest"
+      responses:
+        "200":
+          description: Placeholder fetch response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FetchNewsResponse"
+        "400":
+          description: Request validation failed, or request body is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: ok
+    FetchNewsRequest:
+      type: object
+      description: All filters are optional. Missing or empty sourceIds means all enabled sources in later milestones.
+      properties:
+        sourceIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+            description: Must not be blank.
+        category:
+          type: string
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_-]+$"
+        language:
+          type: string
+          pattern: "^[a-z]{2}$"
+          description: Lowercase ISO 639 language code, such as zh or en.
+        region:
+          type: string
+          pattern: "^[A-Z]{2}$"
+          description: Uppercase ISO 3166 region code, such as CN or US.
+        limit:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+    FetchNewsResponse:
+      type: object
+      required:
+        - status
+        - items
+        - errors
+      properties:
+        status:
+          type: string
+          enum:
+            - OK
+            - PARTIAL
+            - FAILED
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NewsItem"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FetchError"
+    NewsItem:
+      type: object
+      description: News item skeleton. Fields are reserved for later milestones.
+      additionalProperties: true
+    FetchError:
+      type: object
+      description: Fetch error skeleton. Fields are reserved for later milestones.
+      additionalProperties: true
+    ApiErrorResponse:
+      type: object
+      required:
+        - status
+        - message
+        - errors
+      properties:
+        status:
+          type: string
+          example: BAD_REQUEST
+        message:
+          type: string
+          example: Request validation failed
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiFieldError"
+    ApiFieldError:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          example: limit
+        message:
+          type: string
+          example: must be less than or equal to 100

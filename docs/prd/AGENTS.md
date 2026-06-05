@@ -23,10 +23,10 @@ Current development must proceed milestone by milestone. Do not implement future
 Use:
 
 ```text
-com.example.newsfetch
+com.vanlo.newsfetch
 ```
 
-If the generated project currently uses another root package, either refactor it to `com.example.newsfetch` before continuing or keep all new code consistent with the existing package root.
+Keep all new code consistent with `com.vanlo.newsfetch`.
 
 ## Architecture Rules
 
