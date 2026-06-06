@@ -2,7 +2,7 @@
 
 Spring Boot service for fetching and normalizing news data from configurable sources.
 
-The current implementation supports real RSS fetching through configured sources, plus request-level normalization and basic deduplication. It does not implement JSON API sources, HTML sources, retry, fallback, caching, persistent deduplication, source status, or final ranking.
+The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, per-source retry for retryable failures, and one-level fallback sources. It does not implement JSON API sources, HTML sources, caching, persistent deduplication, source status, backoff, recursive fallback chains, or final ranking.
 
 ## Tech Stack
 
@@ -57,12 +57,30 @@ Current configuration loading binds and validates source metadata. RSS sources a
 * Select configured sources from request filters.
 * Resolve a source adapter by `SourceType`.
 * Fetch source items through the adapter.
+* Retry retryable source failures according to `retry-count`.
+* Try configured fallback sources when a source still fails without items.
 * Merge source-level errors without failing the whole request.
 * Normalize fetched items.
 * Deduplicate request-local items.
 * Apply the response limit and calculate the response status.
 
 Current adapter support is limited to `RSS`. Future JSON API and HTML sources should be added as new `NewsSourceAdapter` implementations.
+
+Current retry behavior is intentionally basic:
+
+* `retry-count` means additional attempts after the first attempt.
+* Only retryable source failures are retried.
+* A successful retry suppresses the earlier transient error from the API response.
+* Exhausted retries return the final failure.
+* No backoff, jitter, scheduling, or source status logging is implemented yet.
+
+Current fallback behavior is also intentionally basic:
+
+* `fallback-source-ids` are tried in configured order after the primary source has no items and has errors.
+* Fallback sources must be configured, enabled, and supported by an adapter.
+* The first fallback source that returns items stops the fallback chain.
+* Primary source errors are preserved, so successful fallback usually returns `PARTIAL`.
+* Fallback is one level only; fallback sources do not recursively invoke their own fallback lists.
 
 Configuration rules:
 

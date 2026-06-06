@@ -27,15 +27,17 @@ com.vanlo.newsfetch
 * RSS 真实拉取和 Rome RSS/Atom 解析。
 * 请求内标准化和基础去重。
 * FetchOrchestrator 基础编排。
+* retryable 来源失败的基础重试。
+* 一层顺序 fallback。
 
 当前阶段仍不实现：
 
 * JSON API 来源。
 * HTML 来源。
-* retry。
-* fallback。
 * cache。
 * source status。
+* retry backoff / jitter。
+* 递归 fallback 链。
 * 最终排序。
 
 ## 3. 技术栈
@@ -211,6 +213,23 @@ occurredAt
 * 相同 fingerprint 的新闻只保留第一条。
 * 去重只在单次请求内生效，不持久化，不使用缓存。
 
+当前 retry 规则：
+
+* `retryCount` 表示首次请求失败后的额外尝试次数。
+* 只有无 items 且所有错误均为 `retryable=true` 时才重试。
+* 重试成功时，不在 API 响应中暴露中间失败。
+* 重试耗尽时，返回最后一次失败。
+* 当前不实现 backoff、jitter、异步调度或 source status 记录。
+
+当前 fallback 规则：
+
+* 主来源经过 retry 后仍无 items 且有 errors 时，才尝试 `fallbackSourceIds`。
+* 兜底来源按配置顺序尝试。
+* 兜底来源必须已配置、enabled，且有可用 adapter。
+* 第一个返回 items 的兜底来源会终止后续兜底尝试。
+* 主来源错误会保留，因此兜底成功通常返回 `PARTIAL`。
+* 当前只支持一层 fallback，不递归执行兜底来源自己的 `fallbackSourceIds`。
+
 ## 7. 安全要求
 
 * 来源 URL 只允许 http / https。
@@ -227,10 +246,10 @@ occurredAt
 
 建议后续阶段：
 
-1. retry。
-2. fallback。
-3. cache。
-4. source status 和日志。
+1. cache。
+2. source status 和日志。
+3. retry backoff / jitter。
+4. recursive fallback / fallback policy。
 5. DNS 解析后的安全校验。
 6. JSON API source adapter。
 7. HTML source adapter。

@@ -47,7 +47,7 @@ public class FetchOrchestrator {
                 continue;
             }
 
-            SourceFetchResult result = adapter.get().fetch(sourceConfig);
+            SourceFetchResult result = fetchWithRetryAndFallback(adapter.get(), sourceConfig);
             fetchedItems.addAll(result.items());
             errors.addAll(result.errors());
         }
@@ -61,6 +61,81 @@ public class FetchOrchestrator {
                 .toList();
 
         return new FetchOrchestrationResult(status(limitedItems, errors), limitedItems, errors);
+    }
+
+    private SourceFetchResult fetchWithRetryAndFallback(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+        SourceFetchResult primaryResult = fetchWithRetry(adapter, sourceConfig);
+        if (!shouldFallback(sourceConfig, primaryResult)) {
+            return primaryResult;
+        }
+
+        List<FetchError> errors = new ArrayList<>(primaryResult.errors());
+        for (String fallbackSourceId : new LinkedHashSet<>(sourceConfig.fallbackSourceIds())) {
+            Optional<SourceConfig> fallbackSource = fallbackSourceFor(sourceConfig, fallbackSourceId, errors);
+            if (fallbackSource.isEmpty()) {
+                continue;
+            }
+
+            NewsSourceAdapter fallbackAdapter = adapterFor(fallbackSource.get()).orElseThrow();
+            SourceFetchResult fallbackResult = fetchWithRetry(fallbackAdapter, fallbackSource.get());
+            errors.addAll(fallbackResult.errors());
+            if (!fallbackResult.items().isEmpty()) {
+                return new SourceFetchResult(fallbackResult.items(), errors);
+            }
+        }
+
+        return new SourceFetchResult(List.of(), errors);
+    }
+
+    private Optional<SourceConfig> fallbackSourceFor(SourceConfig primarySource, String fallbackSourceId, List<FetchError> errors) {
+        if (primarySource.id().equals(fallbackSourceId)) {
+            errors.add(fallbackSelectionError(fallbackSourceId, "FALLBACK_SOURCE_INVALID", "Fallback source must not reference itself"));
+            return Optional.empty();
+        }
+
+        Optional<SourceConfig> sourceConfig = sourceConfigRegistry.findById(fallbackSourceId);
+        if (sourceConfig.isEmpty()) {
+            errors.add(fallbackSelectionError(fallbackSourceId, "FALLBACK_SOURCE_NOT_FOUND", "Fallback source is not configured"));
+            return Optional.empty();
+        }
+
+        SourceConfig source = sourceConfig.get();
+        if (!source.enabled()) {
+            errors.add(fallbackSelectionError(fallbackSourceId, "FALLBACK_SOURCE_DISABLED", "Fallback source is disabled"));
+            return Optional.empty();
+        }
+        if (!hasAdapter(source)) {
+            errors.add(fallbackSelectionError(fallbackSourceId, "FALLBACK_SOURCE_UNSUPPORTED_TYPE", "Fallback source type is not supported"));
+            return Optional.empty();
+        }
+
+        return Optional.of(source);
+    }
+
+    private static boolean shouldFallback(SourceConfig sourceConfig, SourceFetchResult result) {
+        return !sourceConfig.fallbackSourceIds().isEmpty()
+                && result.items().isEmpty()
+                && !result.errors().isEmpty();
+    }
+
+    private static SourceFetchResult fetchWithRetry(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+        int maxAttempts = sourceConfig.retryCount() + 1;
+        SourceFetchResult result = new SourceFetchResult(List.of(), List.of());
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            result = adapter.fetch(sourceConfig);
+            if (attempt == maxAttempts || !shouldRetry(result)) {
+                return result;
+            }
+        }
+
+        return result;
+    }
+
+    private static boolean shouldRetry(SourceFetchResult result) {
+        return result.items().isEmpty()
+                && !result.errors().isEmpty()
+                && result.errors().stream().allMatch(FetchError::retryable);
     }
 
     private List<SourceConfig> selectSources(FetchNewsCommand command, List<FetchError> errors) {
@@ -121,6 +196,10 @@ public class FetchOrchestrator {
 
     private static FetchError selectionError(String sourceId, String code, String message) {
         return new FetchError(sourceId, "SOURCE_SELECTION", code, message, false, Instant.now());
+    }
+
+    private static FetchError fallbackSelectionError(String sourceId, String code, String message) {
+        return new FetchError(sourceId, "FALLBACK_SELECTION", code, message, false, Instant.now());
     }
 
     private static FetchStatus status(List<NewsItem> items, List<FetchError> errors) {

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -114,6 +115,166 @@ class FetchOrchestratorTest {
         assertThat(result.errors().getFirst().code()).isEqualTo("UNSUPPORTED_SOURCE_TYPE");
     }
 
+    @Test
+    void retriesRetryableSourceFailuresAndReturnsSuccessfulAttempt() {
+        AtomicInteger attempts = new AtomicInteger();
+        SourceHttpClient client = request -> {
+            if (attempts.incrementAndGet() == 1) {
+                return new SourceHttpResponse(503, Map.of(), new byte[0]);
+            }
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Recovered").getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true, 1)),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+
+        assertThat(attempts).hasValue(2);
+        assertThat(result.status()).isEqualTo(FetchStatus.OK);
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().getFirst().title()).isEqualTo("Recovered");
+        assertThat(result.errors()).isEmpty();
+    }
+
+    @Test
+    void returnsLastRetryableFailureWhenRetriesAreExhausted() {
+        AtomicInteger attempts = new AtomicInteger();
+        SourceHttpClient client = request -> {
+            attempts.incrementAndGet();
+            return new SourceHttpResponse(503, Map.of(), new byte[0]);
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true, 2)),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+
+        assertThat(attempts).hasValue(3);
+        assertThat(result.status()).isEqualTo(FetchStatus.FAILED);
+        assertThat(result.items()).isEmpty();
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().getFirst().code()).isEqualTo("HTTP_STATUS");
+    }
+
+    @Test
+    void doesNotRetryNonRetryableSourceFailures() {
+        AtomicInteger attempts = new AtomicInteger();
+        SourceHttpClient client = request -> {
+            attempts.incrementAndGet();
+            return new SourceHttpResponse(200, Map.of(), "<rss>".getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true, 3)),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+
+        assertThat(attempts).hasValue(1);
+        assertThat(result.status()).isEqualTo(FetchStatus.FAILED);
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().getFirst().code()).isEqualTo("RSS_PARSE_ERROR");
+    }
+
+    @Test
+    void usesFallbackSourceWhenPrimarySourceFails() {
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-primary")) {
+                return new SourceHttpResponse(500, Map.of(), new byte[0]);
+            }
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Fallback item").getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(
+                        source("rss-primary", SourceType.RSS, true, 0, List.of("rss-fallback")),
+                        source("rss-fallback", SourceType.RSS, true)
+                ),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-primary"), null, null, null, 20));
+
+        assertThat(result.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().getFirst().title()).isEqualTo("Fallback item");
+        assertThat(result.items().getFirst().sourceId()).isEqualTo("rss-fallback");
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().getFirst().sourceId()).isEqualTo("rss-primary");
+        assertThat(result.errors().getFirst().code()).isEqualTo("HTTP_STATUS");
+    }
+
+    @Test
+    void usesFallbackOnlyAfterPrimaryRetriesAreExhausted() {
+        AtomicInteger primaryAttempts = new AtomicInteger();
+        AtomicInteger fallbackAttempts = new AtomicInteger();
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-primary")) {
+                primaryAttempts.incrementAndGet();
+                return new SourceHttpResponse(503, Map.of(), new byte[0]);
+            }
+            fallbackAttempts.incrementAndGet();
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Fallback item").getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(
+                        source("rss-primary", SourceType.RSS, true, 2, List.of("rss-fallback")),
+                        source("rss-fallback", SourceType.RSS, true)
+                ),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-primary"), null, null, null, 20));
+
+        assertThat(primaryAttempts).hasValue(3);
+        assertThat(fallbackAttempts).hasValue(1);
+        assertThat(result.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.errors()).hasSize(1);
+    }
+
+    @Test
+    void returnsFallbackSelectionErrorsWhenFallbackSourcesAreInvalid() {
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-primary", SourceType.RSS, true, 0, List.of("rss-primary", "missing-fallback"))),
+                request -> new SourceHttpResponse(500, Map.of(), new byte[0])
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-primary"), null, null, null, 20));
+
+        assertThat(result.status()).isEqualTo(FetchStatus.FAILED);
+        assertThat(result.items()).isEmpty();
+        assertThat(result.errors()).extracting("code")
+                .containsExactly("HTTP_STATUS", "FALLBACK_SOURCE_INVALID", "FALLBACK_SOURCE_NOT_FOUND");
+    }
+
+    @Test
+    void triesNextFallbackWhenEarlierFallbackFails() {
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-final")) {
+                return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Final fallback").getBytes(StandardCharsets.UTF_8));
+            }
+            return new SourceHttpResponse(500, Map.of(), new byte[0]);
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(
+                        source("rss-primary", SourceType.RSS, true, 0, List.of("rss-bad", "rss-final")),
+                        source("rss-bad", SourceType.RSS, true),
+                        source("rss-final", SourceType.RSS, true)
+                ),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-primary"), null, null, null, 20));
+
+        assertThat(result.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().getFirst().sourceId()).isEqualTo("rss-final");
+        assertThat(result.errors()).extracting("sourceId").containsExactly("rss-primary", "rss-bad");
+    }
+
     private static FetchOrchestrator orchestratorWithSources(List<NewsFetchProperties.Source> sources, SourceHttpClient client) {
         SourceConfigRegistry registry = new SourceConfigRegistry(
                 new NewsFetchProperties(sources),
@@ -128,6 +289,20 @@ class FetchOrchestratorTest {
     }
 
     private static NewsFetchProperties.Source source(String id, SourceType type, boolean enabled) {
+        return source(id, type, enabled, 0);
+    }
+
+    private static NewsFetchProperties.Source source(String id, SourceType type, boolean enabled, int retryCount) {
+        return source(id, type, enabled, retryCount, List.of());
+    }
+
+    private static NewsFetchProperties.Source source(
+            String id,
+            SourceType type,
+            boolean enabled,
+            int retryCount,
+            List<String> fallbackSourceIds
+    ) {
         return new NewsFetchProperties.Source(
                 id,
                 id,
@@ -143,8 +318,8 @@ class FetchOrchestratorTest {
                 Map.of(),
                 5000,
                 1048576,
-                0,
-                List.of(),
+                retryCount,
+                fallbackSourceIds,
                 Map.of(),
                 null,
                 null
