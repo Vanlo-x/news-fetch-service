@@ -50,6 +50,20 @@ news-fetch:
 
 Current configuration loading binds and validates source metadata. RSS sources are fetched only when `/v1/news/fetch` is called.
 
+## Fetch Orchestration
+
+`FetchNewsUseCase` maps the HTTP request contract into an application command. `FetchOrchestrator` owns the current fetch pipeline:
+
+* Select configured sources from request filters.
+* Resolve a source adapter by `SourceType`.
+* Fetch source items through the adapter.
+* Merge source-level errors without failing the whole request.
+* Normalize fetched items.
+* Deduplicate request-local items.
+* Apply the response limit and calculate the response status.
+
+Current adapter support is limited to `RSS`. Future JSON API and HTML sources should be added as new `NewsSourceAdapter` implementations.
+
 Configuration rules:
 
 * `id`, `name`, `type`, and `url` are required.

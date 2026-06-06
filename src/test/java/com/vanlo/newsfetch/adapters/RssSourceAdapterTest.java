@@ -19,7 +19,7 @@ class RssSourceAdapterTest {
     void parsesRssItemsIntoNewsItems() {
         RssSourceAdapter adapter = new RssSourceAdapter(successClient(rssFixture()));
 
-        RssFetchResult result = adapter.fetch(sourceConfig("rss-source"));
+        SourceFetchResult result = adapter.fetch(sourceConfig("rss-source"));
 
         assertThat(result.errors()).isEmpty();
         assertThat(result.items()).hasSize(1);
@@ -35,7 +35,7 @@ class RssSourceAdapterTest {
     void returnsErrorForNonSuccessfulHttpStatus() {
         RssSourceAdapter adapter = new RssSourceAdapter(request -> new SourceHttpResponse(503, Map.of(), new byte[0]));
 
-        RssFetchResult result = adapter.fetch(sourceConfig("rss-source"));
+        SourceFetchResult result = adapter.fetch(sourceConfig("rss-source"));
 
         assertThat(result.items()).isEmpty();
         assertThat(result.errors()).hasSize(1);
@@ -49,7 +49,7 @@ class RssSourceAdapterTest {
             throw new SourceHttpClientException("network failed");
         });
 
-        RssFetchResult result = adapter.fetch(sourceConfig("rss-source"));
+        SourceFetchResult result = adapter.fetch(sourceConfig("rss-source"));
 
         assertThat(result.items()).isEmpty();
         assertThat(result.errors()).hasSize(1);
@@ -60,7 +60,7 @@ class RssSourceAdapterTest {
     void returnsErrorForInvalidXml() {
         RssSourceAdapter adapter = new RssSourceAdapter(successClient("<rss>"));
 
-        RssFetchResult result = adapter.fetch(sourceConfig("rss-source"));
+        SourceFetchResult result = adapter.fetch(sourceConfig("rss-source"));
 
         assertThat(result.items()).isEmpty();
         assertThat(result.errors()).hasSize(1);
@@ -78,7 +78,7 @@ class RssSourceAdapterTest {
                 </rss>
                 """));
 
-        RssFetchResult result = adapter.fetch(sourceConfig("rss-source"));
+        SourceFetchResult result = adapter.fetch(sourceConfig("rss-source"));
 
         assertThat(result.items()).isEmpty();
         assertThat(result.errors()).isEmpty();

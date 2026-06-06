@@ -1,189 +1,56 @@
 package com.vanlo.newsfetch.application;
 
-import com.vanlo.newsfetch.adapters.RssSourceAdapter;
 import com.vanlo.newsfetch.api.FetchNewsRequest;
 import com.vanlo.newsfetch.api.FetchNewsResponse;
-import com.vanlo.newsfetch.config.NewsFetchProperties;
-import com.vanlo.newsfetch.config.SourceConfigRegistry;
-import com.vanlo.newsfetch.config.SourceConfigValidator;
 import com.vanlo.newsfetch.domain.FetchStatus;
-import com.vanlo.newsfetch.domain.SourceType;
-import com.vanlo.newsfetch.infrastructure.SourceHttpClient;
-import com.vanlo.newsfetch.infrastructure.SourceHttpResponse;
-import com.vanlo.newsfetch.infrastructure.SourceUrlValidator;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class FetchNewsUseCaseTest {
 
     @Test
-    void fetchesEnabledRssSourcesAndAppliesLimit() {
-        FetchNewsUseCase useCase = useCaseWithSources(
-                List.of(source("rss-a", SourceType.RSS, true), source("rss-b", SourceType.RSS, true)),
-                successClient(twoItemRssFixture())
-        );
+    void mapsRequestToOrchestratorCommandAndAppliesDefaultLimit() {
+        FetchOrchestrator orchestrator = mock(FetchOrchestrator.class);
+        when(orchestrator.fetch(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new FetchOrchestrationResult(FetchStatus.OK, List.of(), List.of()));
+        FetchNewsUseCase useCase = new FetchNewsUseCase(orchestrator);
 
-        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(null, null, null, null, 1));
+        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(List.of("rss-a"), "world", "en", "GB", null));
 
+        ArgumentCaptor<FetchNewsCommand> commandCaptor = ArgumentCaptor.forClass(FetchNewsCommand.class);
+        verify(orchestrator).fetch(commandCaptor.capture());
+        FetchNewsCommand command = commandCaptor.getValue();
+        assertThat(command.sourceIds()).containsExactly("rss-a");
+        assertThat(command.category()).isEqualTo("world");
+        assertThat(command.language()).isEqualTo("en");
+        assertThat(command.region()).isEqualTo("GB");
+        assertThat(command.limit()).isEqualTo(20);
         assertThat(response.status()).isEqualTo(FetchStatus.OK);
-        assertThat(response.items()).hasSize(1);
-        assertThat(response.errors()).isEmpty();
     }
 
     @Test
-    void returnsPartialWhenSomeSourcesFail() {
-        SourceHttpClient client = request -> {
-            if (request.url().contains("rss-a")) {
-                return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("A").getBytes(StandardCharsets.UTF_8));
-            }
-            return new SourceHttpResponse(500, Map.of(), new byte[0]);
-        };
-        FetchNewsUseCase useCase = useCaseWithSources(
-                List.of(source("rss-a", SourceType.RSS, true), source("rss-b", SourceType.RSS, true)),
-                client
-        );
+    void treatsNullRequestAsEmptyRequest() {
+        FetchOrchestrator orchestrator = mock(FetchOrchestrator.class);
+        when(orchestrator.fetch(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new FetchOrchestrationResult(FetchStatus.OK, List.of(), List.of()));
+        FetchNewsUseCase useCase = new FetchNewsUseCase(orchestrator);
 
-        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(null, null, null, null, null));
+        useCase.fetch(null);
 
-        assertThat(response.status()).isEqualTo(FetchStatus.PARTIAL);
-        assertThat(response.items()).hasSize(1);
-        assertThat(response.errors()).hasSize(1);
-    }
-
-    @Test
-    void deduplicatesItemsAcrossSourcesBeforeApplyingLimit() {
-        SourceHttpClient client = request -> new SourceHttpResponse(
-                200,
-                Map.of(),
-                singleItemWithUrl("Shared title", "https://example.com/shared#tracking").getBytes(StandardCharsets.UTF_8)
-        );
-        FetchNewsUseCase useCase = useCaseWithSources(
-                List.of(source("rss-a", SourceType.RSS, true), source("rss-b", SourceType.RSS, true)),
-                client
-        );
-
-        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(null, null, null, null, 20));
-
-        assertThat(response.status()).isEqualTo(FetchStatus.OK);
-        assertThat(response.items()).hasSize(1);
-        assertThat(response.items().getFirst().url()).isEqualTo("https://example.com/shared");
-    }
-
-
-    @Test
-    void returnsFailedForUnknownSourceId() {
-        FetchNewsUseCase useCase = useCaseWithSources(List.of(source("rss-a", SourceType.RSS, true)), successClient(twoItemRssFixture()));
-
-        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(List.of("missing"), null, null, null, null));
-
-        assertThat(response.status()).isEqualTo(FetchStatus.FAILED);
-        assertThat(response.items()).isEmpty();
-        assertThat(response.errors()).hasSize(1);
-        assertThat(response.errors().getFirst().code()).isEqualTo("SOURCE_NOT_FOUND");
-    }
-
-    @Test
-    void ignoresNonRssSourcesWhenNoSourceIdsAreSpecified() {
-        FetchNewsUseCase useCase = useCaseWithSources(List.of(source("api-a", SourceType.API, true)), successClient(twoItemRssFixture()));
-
-        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(null, null, null, null, null));
-
-        assertThat(response.status()).isEqualTo(FetchStatus.OK);
-        assertThat(response.items()).isEmpty();
-        assertThat(response.errors()).isEmpty();
-    }
-
-    @Test
-    void returnsErrorForExplicitUnsupportedSourceType() {
-        FetchNewsUseCase useCase = useCaseWithSources(List.of(source("api-a", SourceType.API, true)), successClient(twoItemRssFixture()));
-
-        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(List.of("api-a"), null, null, null, null));
-
-        assertThat(response.status()).isEqualTo(FetchStatus.FAILED);
-        assertThat(response.errors().getFirst().code()).isEqualTo("UNSUPPORTED_SOURCE_TYPE");
-    }
-
-    private static FetchNewsUseCase useCaseWithSources(List<NewsFetchProperties.Source> sources, SourceHttpClient client) {
-        SourceConfigRegistry registry = new SourceConfigRegistry(
-                new NewsFetchProperties(sources),
-                new SourceConfigValidator(new SourceUrlValidator())
-        );
-        return new FetchNewsUseCase(
-                registry,
-                new RssSourceAdapter(client),
-                new NewsItemNormalizer(),
-                new NewsItemDeduplicator()
-        );
-    }
-
-    private static NewsFetchProperties.Source source(String id, SourceType type, boolean enabled) {
-        return new NewsFetchProperties.Source(
-                id,
-                id,
-                type,
-                enabled,
-                100,
-                null,
-                null,
-                null,
-                "https://example.com/" + id + ".xml",
-                "GET",
-                Map.of(),
-                Map.of(),
-                5000,
-                1048576,
-                0,
-                List.of(),
-                Map.of(),
-                null,
-                null
-        );
-    }
-
-    private static SourceHttpClient successClient(String body) {
-        return request -> new SourceHttpResponse(200, Map.of(), body.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String singleItemRssFixture(String title) {
-        return singleItemWithUrl(title, "https://example.com/news/" + title);
-    }
-
-    private static String singleItemWithUrl(String title, String url) {
-        return """
-                <?xml version="1.0" encoding="UTF-8" ?>
-                <rss version="2.0">
-                  <channel>
-                    <title>Fixture Feed</title>
-                    <item>
-                      <title>%s</title>
-                      <link>%s</link>
-                    </item>
-                  </channel>
-                </rss>
-                """.formatted(title, url);
-    }
-
-    private static String twoItemRssFixture() {
-        return """
-                <?xml version="1.0" encoding="UTF-8" ?>
-                <rss version="2.0">
-                  <channel>
-                    <title>Fixture Feed</title>
-                    <item>
-                      <title>First item</title>
-                      <link>https://example.com/news/1</link>
-                    </item>
-                    <item>
-                      <title>Second item</title>
-                      <link>https://example.com/news/2</link>
-                    </item>
-                  </channel>
-                </rss>
-                """;
+        ArgumentCaptor<FetchNewsCommand> commandCaptor = ArgumentCaptor.forClass(FetchNewsCommand.class);
+        verify(orchestrator).fetch(commandCaptor.capture());
+        FetchNewsCommand command = commandCaptor.getValue();
+        assertThat(command.sourceIds()).isEmpty();
+        assertThat(command.category()).isNull();
+        assertThat(command.language()).isNull();
+        assertThat(command.region()).isNull();
+        assertThat(command.limit()).isEqualTo(20);
     }
 }

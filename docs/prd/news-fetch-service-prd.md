@@ -26,6 +26,7 @@ com.vanlo.newsfetch
 * 受限 HTTP client。
 * RSS 真实拉取和 Rome RSS/Atom 解析。
 * 请求内标准化和基础去重。
+* FetchOrchestrator 基础编排。
 
 当前阶段仍不实现：
 
@@ -65,7 +66,7 @@ domain/
   领域模型，如 NewsItem、SourceConfig、FetchError
 
 application/
-  业务入口、标准化、去重和后续编排
+  业务入口、FetchOrchestrator、标准化、去重和后续编排
 
 adapters/
   不同来源适配器。当前实现 RSS adapter
@@ -226,11 +227,11 @@ occurredAt
 
 建议后续阶段：
 
-1. FetchOrchestrator。
-2. retry。
-3. fallback。
-4. cache。
-5. source status 和日志。
-6. DNS 解析后的安全校验。
-7. JSON API source adapter。
+1. retry。
+2. fallback。
+3. cache。
+4. source status 和日志。
+5. DNS 解析后的安全校验。
+6. JSON API source adapter。
+7. HTML source adapter。
 8. 部署和运行文档。

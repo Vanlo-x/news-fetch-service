@@ -8,6 +8,7 @@ import com.rometools.rome.io.XmlReader;
 import com.vanlo.newsfetch.domain.FetchError;
 import com.vanlo.newsfetch.domain.NewsItem;
 import com.vanlo.newsfetch.domain.SourceConfig;
+import com.vanlo.newsfetch.domain.SourceType;
 import com.vanlo.newsfetch.infrastructure.SourceHttpClient;
 import com.vanlo.newsfetch.infrastructure.SourceHttpClientException;
 import com.vanlo.newsfetch.infrastructure.SourceHttpRequest;
@@ -27,7 +28,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-public class RssSourceAdapter {
+public class RssSourceAdapter implements NewsSourceAdapter {
 
     private static final String STAGE_FETCH = "FETCH";
     private static final String STAGE_PARSE = "PARSE";
@@ -38,7 +39,13 @@ public class RssSourceAdapter {
         this.sourceHttpClient = sourceHttpClient;
     }
 
-    public RssFetchResult fetch(SourceConfig sourceConfig) {
+    @Override
+    public boolean supports(SourceType sourceType) {
+        return sourceType == SourceType.RSS;
+    }
+
+    @Override
+    public SourceFetchResult fetch(SourceConfig sourceConfig) {
         Instant occurredAt = Instant.now();
         SourceHttpResponse response;
         try {
@@ -50,7 +57,7 @@ public class RssSourceAdapter {
                     sourceConfig.maxResponseBytes()
             ));
         } catch (SourceHttpClientException exception) {
-            return new RssFetchResult(List.of(), List.of(new FetchError(
+            return new SourceFetchResult(List.of(), List.of(new FetchError(
                     sourceConfig.id(),
                     STAGE_FETCH,
                     "HTTP_CLIENT_ERROR",
@@ -61,7 +68,7 @@ public class RssSourceAdapter {
         }
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            return new RssFetchResult(List.of(), List.of(new FetchError(
+            return new SourceFetchResult(List.of(), List.of(new FetchError(
                     sourceConfig.id(),
                     STAGE_FETCH,
                     "HTTP_STATUS",
@@ -73,9 +80,9 @@ public class RssSourceAdapter {
 
         try {
             SyndFeed feed = new SyndFeedInput().build(new XmlReader(new ByteArrayInputStream(response.body())));
-            return new RssFetchResult(toNewsItems(feed, sourceConfig, Instant.now()), List.of());
+            return new SourceFetchResult(toNewsItems(feed, sourceConfig, Instant.now()), List.of());
         } catch (Exception exception) {
-            return new RssFetchResult(List.of(), List.of(new FetchError(
+            return new SourceFetchResult(List.of(), List.of(new FetchError(
                     sourceConfig.id(),
                     STAGE_PARSE,
                     "RSS_PARSE_ERROR",
