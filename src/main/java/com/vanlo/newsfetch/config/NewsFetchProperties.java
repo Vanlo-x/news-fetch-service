@@ -69,6 +69,10 @@ public record NewsFetchProperties(
             @Max(30000)
             Integer timeoutMs,
 
+            @Min(1024)
+            @Max(5242880)
+            Integer maxResponseBytes,
+
             @Min(0)
             @Max(5)
             Integer retryCount,
@@ -98,6 +102,7 @@ public record NewsFetchProperties(
                     headers == null ? Map.of() : Map.copyOf(headers),
                     params == null ? Map.of() : Map.copyOf(params),
                     timeoutMs == null ? 5000 : timeoutMs,
+                    maxResponseBytes == null ? 1048576 : maxResponseBytes,
                     retryCount == null ? 0 : retryCount,
                     fallbackSourceIds == null ? List.of() : List.copyOf(fallbackSourceIds),
                     parserConfig == null ? Map.of() : Map.copyOf(parserConfig),

@@ -45,6 +45,7 @@ class SourceConfigRegistryTest {
                         assertThat(source.priority()).isEqualTo(100);
                         assertThat(source.method()).isEqualTo("GET");
                         assertThat(source.timeoutMs()).isEqualTo(5000);
+                        assertThat(source.maxResponseBytes()).isEqualTo(1048576);
                         assertThat(source.retryCount()).isZero();
                         assertThat(source.headers()).isEmpty();
                         assertThat(source.params()).isEmpty();

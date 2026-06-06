@@ -132,6 +132,7 @@ method
 headers
 params
 timeoutMs
+maxResponseBytes
 retryCount
 fallbackSourceIds
 parserConfig
@@ -148,6 +149,7 @@ cacheTtlSeconds
 * `url` 不允许包含 user info。
 * `url` 不允许指向 localhost、loopback、内网 IP、link-local、unspecified address 或 metadata service。
 * 当前阶段不做 DNS 解析，只校验 URL 字面量和 IP 字面量。
+* 受限 HTTP client 已提供请求前 URL 复检、超时、响应大小限制、不跟随重定向和敏感 header 过滤。
 * 当前阶段只加载和校验配置，不请求真实来源。
 
 ### FetchError

@@ -17,6 +17,7 @@ public record SourceConfig(
         Map<String, String> headers,
         Map<String, String> params,
         int timeoutMs,
+        int maxResponseBytes,
         int retryCount,
         List<String> fallbackSourceIds,
         Map<String, Object> parserConfig,

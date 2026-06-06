@@ -44,6 +44,7 @@ news-fetch:
       url: https://example.com/rss.xml
       method: GET
       timeout-ms: 5000
+      max-response-bytes: 1048576
       retry-count: 0
 ```
 
@@ -61,7 +62,22 @@ Configuration rules:
 * `priority` defaults to `100`; lower values are loaded first.
 * `method` defaults to `GET`.
 * `timeout-ms` defaults to `5000`.
+* `max-response-bytes` defaults to `1048576`.
 * `retry-count` defaults to `0`.
+
+## Restricted Source HTTP Client
+
+The infrastructure layer includes a restricted source HTTP client for future RSS/API adapters. It is not wired into `/v1/news/fetch` yet.
+
+Current behavior:
+
+* Re-validates source URLs before each request.
+* Supports `GET` and empty-body `POST`.
+* Applies per-request timeout.
+* Enforces `max-response-bytes` while reading the response.
+* Does not follow redirects.
+* Drops sensitive outbound headers: `Authorization`, `Cookie`, and `Proxy-Authorization`.
+* Does not parse RSS, normalize news, retry, fallback, or cache.
 
 ## Run Locally
 
