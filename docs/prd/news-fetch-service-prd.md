@@ -29,12 +29,13 @@ com.vanlo.newsfetch
 * FetchOrchestrator 基础编排。
 * retryable 来源失败的基础重试。
 * 一层顺序 fallback。
+* source 级内存 cache。
 
 当前阶段仍不实现：
 
 * JSON API 来源。
 * HTML 来源。
-* cache。
+* 持久化 cache。
 * source status。
 * retry backoff / jitter。
 * 递归 fallback 链。
@@ -230,6 +231,17 @@ occurredAt
 * 主来源错误会保留，因此兜底成功通常返回 `PARTIAL`。
 * 当前只支持一层 fallback，不递归执行兜底来源自己的 `fallbackSourceIds`。
 
+当前 cache 规则：
+
+* `cacheTtlSeconds` 大于 `0` 时启用该来源的内存缓存。
+* cache key 为 source id。
+* 只缓存有 items 且无 errors 的成功来源结果。
+* 失败结果不缓存。
+* cache 命中时跳过该来源的 HTTP fetch、retry 和 fallback。
+* fallback 来源使用自己的 cache entry。
+* cache 中的 items 仍会在每次请求中经过标准化、去重、limit 和状态计算。
+* 当前不实现持久化缓存、容量淘汰、分布式缓存或缓存指标。
+
 ## 7. 安全要求
 
 * 来源 URL 只允许 http / https。
@@ -246,10 +258,10 @@ occurredAt
 
 建议后续阶段：
 
-1. cache。
-2. source status 和日志。
-3. retry backoff / jitter。
-4. recursive fallback / fallback policy。
+1. source status 和日志。
+2. retry backoff / jitter。
+3. recursive fallback / fallback policy。
+4. persistent/distributed cache。
 5. DNS 解析后的安全校验。
 6. JSON API source adapter。
 7. HTML source adapter。

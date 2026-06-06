@@ -275,6 +275,77 @@ class FetchOrchestratorTest {
         assertThat(result.errors()).extracting("sourceId").containsExactly("rss-primary", "rss-bad");
     }
 
+    @Test
+    void cachesSuccessfulSourceResultAndSkipsHttpOnCacheHit() {
+        AtomicInteger attempts = new AtomicInteger();
+        SourceHttpClient client = request -> new SourceHttpResponse(
+                200,
+                Map.of(),
+                singleItemRssFixture("Attempt " + attempts.incrementAndGet()).getBytes(StandardCharsets.UTF_8)
+        );
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true, 0, List.of(), 60L)),
+                client
+        );
+
+        FetchOrchestrationResult firstResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+        FetchOrchestrationResult secondResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+
+        assertThat(attempts).hasValue(1);
+        assertThat(firstResult.items().getFirst().title()).isEqualTo("Attempt 1");
+        assertThat(secondResult.items().getFirst().title()).isEqualTo("Attempt 1");
+        assertThat(secondResult.errors()).isEmpty();
+    }
+
+    @Test
+    void doesNotCacheFailedSourceResult() {
+        AtomicInteger attempts = new AtomicInteger();
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true, 0, List.of(), 60L)),
+                request -> {
+                    attempts.incrementAndGet();
+                    return new SourceHttpResponse(500, Map.of(), new byte[0]);
+                }
+        );
+
+        FetchOrchestrationResult firstResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+        FetchOrchestrationResult secondResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+
+        assertThat(attempts).hasValue(2);
+        assertThat(firstResult.status()).isEqualTo(FetchStatus.FAILED);
+        assertThat(secondResult.status()).isEqualTo(FetchStatus.FAILED);
+    }
+
+    @Test
+    void fallbackSourceUsesItsOwnCacheAcrossPrimaryFailures() {
+        AtomicInteger primaryAttempts = new AtomicInteger();
+        AtomicInteger fallbackAttempts = new AtomicInteger();
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-primary")) {
+                primaryAttempts.incrementAndGet();
+                return new SourceHttpResponse(500, Map.of(), new byte[0]);
+            }
+            fallbackAttempts.incrementAndGet();
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Cached fallback").getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(
+                        source("rss-primary", SourceType.RSS, true, 0, List.of("rss-fallback")),
+                        source("rss-fallback", SourceType.RSS, true, 0, List.of(), 60L)
+                ),
+                client
+        );
+
+        FetchOrchestrationResult firstResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-primary"), null, null, null, 20));
+        FetchOrchestrationResult secondResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-primary"), null, null, null, 20));
+
+        assertThat(primaryAttempts).hasValue(2);
+        assertThat(fallbackAttempts).hasValue(1);
+        assertThat(firstResult.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(secondResult.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(secondResult.items().getFirst().title()).isEqualTo("Cached fallback");
+    }
+
     private static FetchOrchestrator orchestratorWithSources(List<NewsFetchProperties.Source> sources, SourceHttpClient client) {
         SourceConfigRegistry registry = new SourceConfigRegistry(
                 new NewsFetchProperties(sources),
@@ -284,7 +355,8 @@ class FetchOrchestratorTest {
                 registry,
                 List.of(new RssSourceAdapter(client)),
                 new NewsItemNormalizer(),
-                new NewsItemDeduplicator()
+                new NewsItemDeduplicator(),
+                new InMemorySourceFetchCache()
         );
     }
 
@@ -302,6 +374,17 @@ class FetchOrchestratorTest {
             boolean enabled,
             int retryCount,
             List<String> fallbackSourceIds
+    ) {
+        return source(id, type, enabled, retryCount, fallbackSourceIds, null);
+    }
+
+    private static NewsFetchProperties.Source source(
+            String id,
+            SourceType type,
+            boolean enabled,
+            int retryCount,
+            List<String> fallbackSourceIds,
+            Long cacheTtlSeconds
     ) {
         return new NewsFetchProperties.Source(
                 id,
@@ -322,7 +405,7 @@ class FetchOrchestratorTest {
                 fallbackSourceIds,
                 Map.of(),
                 null,
-                null
+                cacheTtlSeconds
         );
     }
 

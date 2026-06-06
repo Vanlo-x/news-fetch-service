@@ -2,7 +2,7 @@
 
 Spring Boot service for fetching and normalizing news data from configurable sources.
 
-The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, per-source retry for retryable failures, and one-level fallback sources. It does not implement JSON API sources, HTML sources, caching, persistent deduplication, source status, backoff, recursive fallback chains, or final ranking.
+The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, per-source retry for retryable failures, one-level fallback sources, and source-level in-memory caching. It does not implement JSON API sources, HTML sources, persistent cache storage, persistent deduplication, source status, backoff, recursive fallback chains, or final ranking.
 
 ## Tech Stack
 
@@ -46,6 +46,7 @@ news-fetch:
       timeout-ms: 5000
       max-response-bytes: 1048576
       retry-count: 0
+      cache-ttl-seconds: 60
 ```
 
 Current configuration loading binds and validates source metadata. RSS sources are fetched only when `/v1/news/fetch` is called.
@@ -59,6 +60,7 @@ Current configuration loading binds and validates source metadata. RSS sources a
 * Fetch source items through the adapter.
 * Retry retryable source failures according to `retry-count`.
 * Try configured fallback sources when a source still fails without items.
+* Read and write source-level cache when `cache-ttl-seconds` is configured.
 * Merge source-level errors without failing the whole request.
 * Normalize fetched items.
 * Deduplicate request-local items.
@@ -82,6 +84,16 @@ Current fallback behavior is also intentionally basic:
 * Primary source errors are preserved, so successful fallback usually returns `PARTIAL`.
 * Fallback is one level only; fallback sources do not recursively invoke their own fallback lists.
 
+Current cache behavior is in-memory and source-scoped:
+
+* `cache-ttl-seconds` enables cache for that source when greater than `0`.
+* Cache key is the source id.
+* Only successful source results with items and no errors are cached.
+* Failed source results are not cached.
+* Cache hit skips HTTP fetch, retry, and fallback for that source.
+* Fallback sources use their own cache entries.
+* Cached items are still normalized, deduplicated, limited, and status-calculated per request.
+
 Configuration rules:
 
 * `id`, `name`, `type`, and `url` are required.
@@ -96,6 +108,7 @@ Configuration rules:
 * `timeout-ms` defaults to `5000`.
 * `max-response-bytes` defaults to `1048576`.
 * `retry-count` defaults to `0`.
+* `cache-ttl-seconds` is optional; missing or `0` disables source-level cache.
 
 ## Restricted Source HTTP Client
 
@@ -181,7 +194,7 @@ Fetched RSS items are normalized before the response is limited:
 * If URL is missing, fingerprint is based on normalized title and published time.
 * Duplicate fingerprints are removed while preserving the first item encountered in source order.
 
-Current deduplication is in-memory and request-scoped only. It is not persistent and does not use cache or storage.
+Current deduplication is in-memory and request-scoped only. It is not persistent and is separate from source-level fetch caching.
 
 ## Run Tests
 

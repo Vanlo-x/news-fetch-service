@@ -9,6 +9,7 @@ import com.vanlo.newsfetch.domain.NewsItem;
 import com.vanlo.newsfetch.domain.SourceConfig;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -22,17 +23,20 @@ public class FetchOrchestrator {
     private final List<NewsSourceAdapter> sourceAdapters;
     private final NewsItemNormalizer newsItemNormalizer;
     private final NewsItemDeduplicator newsItemDeduplicator;
+    private final SourceFetchCache sourceFetchCache;
 
     public FetchOrchestrator(
             SourceConfigRegistry sourceConfigRegistry,
             List<NewsSourceAdapter> sourceAdapters,
             NewsItemNormalizer newsItemNormalizer,
-            NewsItemDeduplicator newsItemDeduplicator
+            NewsItemDeduplicator newsItemDeduplicator,
+            SourceFetchCache sourceFetchCache
     ) {
         this.sourceConfigRegistry = sourceConfigRegistry;
         this.sourceAdapters = List.copyOf(sourceAdapters);
         this.newsItemNormalizer = newsItemNormalizer;
         this.newsItemDeduplicator = newsItemDeduplicator;
+        this.sourceFetchCache = sourceFetchCache;
     }
 
     public FetchOrchestrationResult fetch(FetchNewsCommand command) {
@@ -47,7 +51,7 @@ public class FetchOrchestrator {
                 continue;
             }
 
-            SourceFetchResult result = fetchWithRetryAndFallback(adapter.get(), sourceConfig);
+            SourceFetchResult result = fetchWithCache(adapter.get(), sourceConfig);
             fetchedItems.addAll(result.items());
             errors.addAll(result.errors());
         }
@@ -61,6 +65,21 @@ public class FetchOrchestrator {
                 .toList();
 
         return new FetchOrchestrationResult(status(limitedItems, errors), limitedItems, errors);
+    }
+
+    private SourceFetchResult fetchWithCache(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+        if (!cacheEnabled(sourceConfig)) {
+            return fetchWithRetryAndFallback(adapter, sourceConfig);
+        }
+
+        Optional<SourceFetchResult> cachedResult = sourceFetchCache.get(sourceConfig.id());
+        if (cachedResult.isPresent()) {
+            return cachedResult.get();
+        }
+
+        SourceFetchResult result = fetchWithRetryAndFallback(adapter, sourceConfig);
+        cacheSuccessfulResult(sourceConfig, result);
+        return result;
     }
 
     private SourceFetchResult fetchWithRetryAndFallback(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
@@ -77,7 +96,7 @@ public class FetchOrchestrator {
             }
 
             NewsSourceAdapter fallbackAdapter = adapterFor(fallbackSource.get()).orElseThrow();
-            SourceFetchResult fallbackResult = fetchWithRetry(fallbackAdapter, fallbackSource.get());
+            SourceFetchResult fallbackResult = fetchSingleSourceWithCache(fallbackAdapter, fallbackSource.get());
             errors.addAll(fallbackResult.errors());
             if (!fallbackResult.items().isEmpty()) {
                 return new SourceFetchResult(fallbackResult.items(), errors);
@@ -116,6 +135,32 @@ public class FetchOrchestrator {
         return !sourceConfig.fallbackSourceIds().isEmpty()
                 && result.items().isEmpty()
                 && !result.errors().isEmpty();
+    }
+
+    private SourceFetchResult fetchSingleSourceWithCache(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+        if (!cacheEnabled(sourceConfig)) {
+            return fetchWithRetry(adapter, sourceConfig);
+        }
+
+        Optional<SourceFetchResult> cachedResult = sourceFetchCache.get(sourceConfig.id());
+        if (cachedResult.isPresent()) {
+            return cachedResult.get();
+        }
+
+        SourceFetchResult result = fetchWithRetry(adapter, sourceConfig);
+        cacheSuccessfulResult(sourceConfig, result);
+        return result;
+    }
+
+    private void cacheSuccessfulResult(SourceConfig sourceConfig, SourceFetchResult result) {
+        if (cacheEnabled(sourceConfig) && !result.items().isEmpty() && result.errors().isEmpty()) {
+            sourceFetchCache.put(sourceConfig.id(), result, Duration.ofSeconds(sourceConfig.cacheTtlSeconds()));
+        }
+    }
+
+    private static boolean cacheEnabled(SourceConfig sourceConfig) {
+        Long cacheTtlSeconds = sourceConfig.cacheTtlSeconds();
+        return cacheTtlSeconds != null && cacheTtlSeconds > 0;
     }
 
     private static SourceFetchResult fetchWithRetry(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
