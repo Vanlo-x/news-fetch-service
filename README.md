@@ -93,6 +93,14 @@ On macOS or Linux:
 ./mvnw spring-boot:run
 ```
 
+To run with the sample real RSS source:
+
+```powershell
+.\mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+The `local` profile configures `bbc-news` with `https://feeds.bbci.co.uk/news/rss.xml`.
+
 After startup, verify the service:
 
 ```bash

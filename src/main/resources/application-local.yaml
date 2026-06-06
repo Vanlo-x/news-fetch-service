@@ -1,0 +1,15 @@
+news-fetch:
+  sources:
+    - id: bbc-news
+      name: BBC News
+      type: RSS
+      enabled: true
+      priority: 100
+      category: world
+      language: en
+      region: GB
+      url: https://feeds.bbci.co.uk/news/rss.xml
+      method: GET
+      timeout-ms: 5000
+      max-response-bytes: 1048576
+      retry-count: 0

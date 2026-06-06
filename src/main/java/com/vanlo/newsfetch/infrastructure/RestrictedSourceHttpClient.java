@@ -6,12 +6,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 @Component
 public class RestrictedSourceHttpClient implements SourceHttpClient {
@@ -23,9 +28,7 @@ public class RestrictedSourceHttpClient implements SourceHttpClient {
 
     @Autowired
     public RestrictedSourceHttpClient(SourceUrlValidator sourceUrlValidator) {
-        this(HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build(), sourceUrlValidator);
+        this(defaultHttpClient(), sourceUrlValidator);
     }
 
     RestrictedSourceHttpClient(HttpClient httpClient, SourceUrlValidator sourceUrlValidator) {
@@ -46,11 +49,59 @@ public class RestrictedSourceHttpClient implements SourceHttpClient {
             byte[] body = readLimited(response.body(), request.maxResponseBytes());
             return new SourceHttpResponse(response.statusCode(), response.headers().map(), body);
         } catch (IOException exception) {
-            throw new SourceHttpClientException("Source HTTP request failed", exception);
+            throw new SourceHttpClientException("Source HTTP request failed: " + exception.getMessage(), exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new SourceHttpClientException("Source HTTP request interrupted", exception);
         }
+    }
+
+    private static HttpClient defaultHttpClient() {
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER);
+
+        proxySelectorFromEnvironment().ifPresent(builder::proxy);
+        return builder.build();
+    }
+
+    private static Optional<ProxySelector> proxySelectorFromEnvironment() {
+        String proxy = firstPresent("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy");
+        if (proxy == null || proxy.isBlank()) {
+            return Optional.empty();
+        }
+
+        URI proxyUri = URI.create(proxy);
+        String host = proxyUri.getHost();
+        int port = proxyUri.getPort();
+        if (host == null || port <= 0) {
+            return Optional.empty();
+        }
+
+        List<String> noProxyHosts = noProxyHosts();
+        ProxySelector proxySelector = ProxySelector.of(new InetSocketAddress(host, port));
+        return Optional.of(new NoProxyAwareProxySelector(proxySelector, noProxyHosts));
+    }
+
+    private static String firstPresent(String... names) {
+        for (String name : names) {
+            String value = System.getenv(name);
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static List<String> noProxyHosts() {
+        String noProxy = firstPresent("NO_PROXY", "no_proxy");
+        if (noProxy == null || noProxy.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(noProxy.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .toList();
     }
 
     private static HttpRequest buildRequest(SourceHttpRequest request) {
