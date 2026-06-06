@@ -59,6 +59,7 @@ components:
             minLength: 1
             maxLength: 100
             description: Must not be blank.
+            pattern: "^[A-Za-z0-9_-]+$"
         category:
           type: string
           maxLength: 64

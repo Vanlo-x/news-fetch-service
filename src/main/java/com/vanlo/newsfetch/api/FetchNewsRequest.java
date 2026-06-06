@@ -10,7 +10,7 @@ import java.util.List;
 
 public record FetchNewsRequest(
         @Size(max = 50)
-        List<@NotBlank @Size(max = 100) String> sourceIds,
+        List<@NotBlank @Size(max = 100) @Pattern(regexp = "^[A-Za-z0-9_-]+$", message = "must contain only letters, numbers, underscores, or hyphens") String> sourceIds,
 
         @Size(max = 64)
         @Pattern(regexp = "^[A-Za-z0-9_-]+$", message = "must contain only letters, numbers, underscores, or hyphens")

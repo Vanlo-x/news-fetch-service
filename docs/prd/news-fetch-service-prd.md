@@ -14,6 +14,8 @@
 
 第一阶段不实现真实新闻获取。
 
+当前阶段已开始提供来源配置加载能力，但只绑定和校验配置，不发起外部请求。
+
 当前项目包根为：
 
 ```text
@@ -136,6 +138,17 @@ parserConfig
 rateLimit
 cacheTtlSeconds
 ```
+
+当前配置加载规则：
+
+* 来源配置位于 `news-fetch.sources`。
+* `id`、`name`、`type`、`url` 必填。
+* `id` 必须唯一，且只允许字母、数字、下划线和连字符。
+* `url` 必须使用 `http://` 或 `https://`。
+* `url` 不允许包含 user info。
+* `url` 不允许指向 localhost、loopback、内网 IP、link-local、unspecified address 或 metadata service。
+* 当前阶段不做 DNS 解析，只校验 URL 字面量和 IP 字面量。
+* 当前阶段只加载和校验配置，不请求真实来源。
 
 ### FetchError
 

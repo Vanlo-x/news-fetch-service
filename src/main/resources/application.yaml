@@ -1,3 +1,6 @@
 spring:
   application:
     name: news-fetch-service
+
+news-fetch:
+  sources: []

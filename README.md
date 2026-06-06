@@ -24,6 +24,45 @@ infrastructure
 config
 ```
 
+## Source Configuration
+
+News sources are configured under `news-fetch.sources` in `application.yaml`. The default project configuration uses an empty source list, so the service starts without fetching anything.
+
+Example:
+
+```yaml
+news-fetch:
+  sources:
+    - id: tech-rss
+      name: Tech RSS
+      type: RSS
+      enabled: true
+      priority: 100
+      category: technology
+      language: zh
+      region: CN
+      url: https://example.com/rss.xml
+      method: GET
+      timeout-ms: 5000
+      retry-count: 0
+```
+
+Current configuration loading only binds and validates source metadata. It does not connect to the source URL.
+
+Configuration rules:
+
+* `id`, `name`, `type`, and `url` are required.
+* `id` must be unique across all configured sources and may contain only letters, numbers, underscores, and hyphens.
+* `url` must use `http://` or `https://`.
+* `url` must not contain user info.
+* `url` must not target `localhost`, loopback, private IP ranges, link-local addresses, unspecified addresses, or metadata service addresses.
+* Hostname validation is parse-only in this milestone; DNS resolution is intentionally out of scope until the restricted HTTP client layer.
+* `enabled` defaults to `true`.
+* `priority` defaults to `100`; lower values are loaded first.
+* `method` defaults to `GET`.
+* `timeout-ms` defaults to `5000`.
+* `retry-count` defaults to `0`.
+
 ## Run Locally
 
 On Windows:
@@ -68,7 +107,7 @@ Current `/v1/news/fetch` request contract:
 
 * Request body is required.
 * All filters are optional.
-* `sourceIds` may contain up to 50 non-blank IDs. Missing or empty means all enabled sources in later milestones.
+* `sourceIds` may contain up to 50 non-blank IDs using letters, numbers, underscores, and hyphens. Missing or empty means all enabled sources in later milestones.
 * `category` may contain letters, numbers, underscores, and hyphens.
 * `language` must be a lowercase two-letter language code, such as `zh` or `en`.
 * `region` must be an uppercase two-letter region code, such as `CN` or `US`.
