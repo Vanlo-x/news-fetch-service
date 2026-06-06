@@ -14,7 +14,7 @@ import java.time.Duration;
 import java.util.Locale;
 
 @Component
-public class RestrictedSourceHttpClient {
+public class RestrictedSourceHttpClient implements SourceHttpClient {
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
 
@@ -33,6 +33,7 @@ public class RestrictedSourceHttpClient {
         this.sourceUrlValidator = sourceUrlValidator;
     }
 
+    @Override
     public SourceHttpResponse fetch(SourceHttpRequest request) {
         SourceUrlValidationResult validation = sourceUrlValidator.validate(request.url());
         if (!validation.allowed()) {

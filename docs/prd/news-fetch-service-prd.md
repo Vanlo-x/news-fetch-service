@@ -10,44 +10,34 @@
 
 ## 2. 当前阶段目标
 
-第一阶段目标是创建一个可运行、可测试、结构清晰的 Java Spring Boot + Maven 服务骨架。
-
-第一阶段不实现真实新闻获取。
-
-当前阶段已开始提供来源配置加载能力，但只绑定和校验配置，不发起外部请求。
-
-当前项目包根为：
+项目包根：
 
 ```text
 com.vanlo.newsfetch
 ```
 
-## 3. 服务边界
+当前阶段已经具备：
 
-### 负责
+* Spring Boot + Maven 项目骨架。
+* `/health` 健康检查。
+* `/v1/news/fetch` API 契约和基础参数校验。
+* 来源配置加载和校验。
+* Source URL 安全校验。
+* 受限 HTTP client。
+* RSS 真实拉取和 Rome RSS/Atom 解析。
 
-* 加载可配置新闻来源
-* 拉取新闻原始数据
-* 解析 RSS / API / HTML 来源
-* 标准化为统一 `NewsItem`
-* 基础去重
-* 失败重试
-* 来源级 fallback
-* 缓存 fallback
-* 暴露 HTTP API
-* 记录来源状态和错误信息
+当前阶段仍不实现：
 
-### 不负责
+* JSON API 来源。
+* HTML 来源。
+* retry。
+* fallback。
+* cache。
+* deduplication。
+* source status。
+* 最终排序。
 
-* AI 摘要
-* 个性化推荐
-* 用户偏好
-* 推送通知
-* 前端页面
-* 新闻最终排序
-* 绕过反爬、验证码、登录或付费墙
-
-## 4. 技术栈
+## 3. 技术栈
 
 * Java 21
 * Spring Boot
@@ -56,16 +46,16 @@ com.vanlo.newsfetch
 * Jackson
 * Jakarta Validation
 * Spring Boot Actuator
+* Rome RSS
 
 后续阶段可按需加入：
 
-* Rome RSS
 * Caffeine
 * Redis
 * PostgreSQL
 * springdoc-openapi
 
-## 5. 核心模块
+## 4. 核心模块
 
 ```text
 api/
@@ -75,23 +65,23 @@ domain/
   领域模型，如 NewsItem、SourceConfig、FetchError
 
 application/
-  业务编排，如 FetchOrchestrator、FallbackManager、Deduplicator
+  业务入口和后续编排
 
 adapters/
-  不同来源适配器，如 RSS、JSON API、HTML
+  不同来源适配器。当前实现 RSS adapter
 
 infrastructure/
-  HTTP Client、缓存、配置存储、日志、监控
+  受限 HTTP client、URL 安全校验等基础设施
 
 config/
   Spring 配置和来源配置加载
 ```
 
-## 6. 核心数据模型
+## 5. 核心数据模型
 
 ### NewsItem
 
-字段规划：
+当前字段：
 
 ```text
 id
@@ -114,9 +104,21 @@ qualityScore
 raw
 ```
 
+当前 RSS 映射规则：
+
+* `title` 来自 RSS/Atom entry title。
+* `url` 来自 entry link。
+* `publishedAt` 优先 published date，其次 updated date。
+* `fetchedAt` 为服务拉取时间。
+* `sourceId`、`sourceName`、`category`、`language`、`region` 来自 `SourceConfig`。
+* `summary` 来自 description。
+* `author` 尽量读取 RSS/Atom author。
+* `id` 和 `fingerprint` 当前使用 `sourceId + url/title/publishedAt` 的稳定 SHA-256。
+* `raw` 只保存少量元数据，不保存完整原文。
+
 ### SourceConfig
 
-字段规划：
+当前字段：
 
 ```text
 id
@@ -149,12 +151,10 @@ cacheTtlSeconds
 * `url` 不允许包含 user info。
 * `url` 不允许指向 localhost、loopback、内网 IP、link-local、unspecified address 或 metadata service。
 * 当前阶段不做 DNS 解析，只校验 URL 字面量和 IP 字面量。
-* 受限 HTTP client 已提供请求前 URL 复检、超时、响应大小限制、不跟随重定向和敏感 header 过滤。
-* 当前阶段只加载和校验配置，不请求真实来源。
 
 ### FetchError
 
-字段规划：
+当前字段：
 
 ```text
 sourceId
@@ -165,66 +165,63 @@ retryable
 occurredAt
 ```
 
-## 7. API 初始规划
+当前常见错误：
+
+* `SOURCE_NOT_FOUND`
+* `SOURCE_DISABLED`
+* `UNSUPPORTED_SOURCE_TYPE`
+* `HTTP_CLIENT_ERROR`
+* `HTTP_STATUS`
+* `RSS_PARSE_ERROR`
+
+## 6. API
 
 ### GET /health
 
 返回服务健康状态。
 
-第一阶段已实现。
-
 ### POST /v1/news/fetch
 
-获取新闻数据。
+从配置的 RSS 来源拉取新闻。
 
-当前阶段只提供占位接口和 DTO，返回空结果，不实现真实获取。
+请求规则：
 
-### GET /v1/sources/status
+* 请求体必需。
+* 所有过滤字段可选。
+* `sourceIds` 缺省或为空时使用所有 enabled RSS 来源。
+* 指定 `sourceIds` 时，只拉取匹配的 enabled RSS 来源。
+* `category`、`language`、`region` 用于匹配来源配置。
+* `limit` 缺省为 `20`，最大为 `100`。
 
-获取来源健康状态。
+响应状态：
 
-后续阶段实现。
+* 有 items 且无 errors：`OK`
+* 有 items 且有 errors：`PARTIAL`
+* 无 items 且有 errors：`FAILED`
+* 无 matched RSS 来源且无 errors：`OK`
 
-### POST /v1/sources/validate
-
-校验来源配置。
-
-后续阶段实现。
-
-## 8. 兜底策略
-
-后续实现顺序：
-
-1. 单来源失败不影响整体请求。
-2. 单来源失败后执行 retry。
-3. retry 后失败则尝试 `fallbackSourceIds`。
-4. 仍失败则读取未过期缓存。
-5. 调用方允许时可返回过期缓存。
-6. 所有降级结果必须明确标记。
-7. 不允许伪造新闻数据。
-
-## 9. 安全要求
+## 7. 安全要求
 
 * 来源 URL 只允许 http / https。
 * 禁止请求 localhost、内网 IP、link-local、metadata service。
 * 请求必须有超时。
 * 响应体大小必须限制。
-* 日志不得记录敏感 header。
+* 不跟随重定向。
+* 请求前必须复检 URL。
+* 日志不得记录 Authorization、Cookie、API keys 或 secrets。
 * 单元测试不得请求真实互联网。
 * 不实现绕过反爬、登录、验证码或付费墙的逻辑。
 
-## 10. 第一阶段验收标准
+## 8. 后续实现顺序
 
-第一阶段只做项目骨架。
+建议后续阶段：
 
-完成标准：
-
-* `./mvnw test` 或 `mvn test` 通过。
-* `./mvnw spring-boot:run` 或 `mvn spring-boot:run` 可以启动服务。
-* `GET /health` 返回 ok。
-* `POST /v1/news/fetch` 返回空结果占位响应。
-* 项目目录结构清晰。
-* 存在基础 domain model。
-* 存在基础 DTO。
-* 存在 README 本地启动说明。
-* 不包含真实 RSS 拉取、缓存、fallback 或复杂业务逻辑。
+1. 标准化和基础去重。
+2. FetchOrchestrator。
+3. retry。
+4. fallback。
+5. cache。
+6. source status 和日志。
+7. DNS 解析后的安全校验。
+8. JSON API source adapter。
+9. 部署和运行文档。

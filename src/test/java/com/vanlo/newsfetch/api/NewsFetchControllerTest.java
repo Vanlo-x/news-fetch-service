@@ -1,30 +1,47 @@
 package com.vanlo.newsfetch.api;
 
-import com.vanlo.newsfetch.application.FetchNewsUseCase;
+import com.vanlo.newsfetch.infrastructure.SourceHttpClient;
+import com.vanlo.newsfetch.infrastructure.SourceHttpRequest;
+import com.vanlo.newsfetch.infrastructure.SourceHttpResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(NewsFetchController.class)
-@Import(FetchNewsUseCase.class)
+@SpringBootTest(properties = {
+        "news-fetch.sources[0].id=tech-rss",
+        "news-fetch.sources[0].name=Tech RSS",
+        "news-fetch.sources[0].type=RSS",
+        "news-fetch.sources[0].category=technology",
+        "news-fetch.sources[0].language=zh",
+        "news-fetch.sources[0].region=CN",
+        "news-fetch.sources[0].url=https://example.com/rss.xml"
+})
+@AutoConfigureMockMvc
 class NewsFetchControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
     @Test
-    void fetchReturnsPlaceholderEmptyResponse() throws Exception {
+    void fetchReturnsRealRssItems() throws Exception {
         mockMvc.perform(post("/v1/news/fetch")
                         .contentType("application/json")
                         .content("""
                                 {
-                                  "sourceIds": ["demo"],
+                                  "sourceIds": ["tech-rss"],
                                   "category": "technology",
                                   "language": "zh",
                                   "region": "CN",
@@ -33,9 +50,13 @@ class NewsFetchControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("OK"))
-                .andExpect(jsonPath("$.items").isArray())
-                .andExpect(jsonPath("$.items").isEmpty())
-                .andExpect(jsonPath("$.errors").isArray())
+                .andExpect(jsonPath("$.items[0].title").value("First item"))
+                .andExpect(jsonPath("$.items[0].url").value("https://example.com/news/1"))
+                .andExpect(jsonPath("$.items[0].sourceId").value("tech-rss"))
+                .andExpect(jsonPath("$.items[0].sourceName").value("Tech RSS"))
+                .andExpect(jsonPath("$.items[0].category").value("technology"))
+                .andExpect(jsonPath("$.items[0].language").value("zh"))
+                .andExpect(jsonPath("$.items[0].region").value("CN"))
                 .andExpect(jsonPath("$.errors").isEmpty());
     }
 
@@ -46,8 +67,24 @@ class NewsFetchControllerTest {
                         .content("{}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("OK"))
-                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.items[0].title").value("First item"))
                 .andExpect(jsonPath("$.errors").isEmpty());
+    }
+
+    @Test
+    void fetchReturnsErrorForUnknownSource() throws Exception {
+        mockMvc.perform(post("/v1/news/fetch")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "sourceIds": ["missing-source"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.items").isEmpty())
+                .andExpect(jsonPath("$.errors[0].sourceId").value("missing-source"))
+                .andExpect(jsonPath("$.errors[0].code").value("SOURCE_NOT_FOUND"));
     }
 
     @Test
@@ -104,5 +141,38 @@ class NewsFetchControllerTest {
                 .andExpect(jsonPath("$.status").value("BAD_REQUEST"))
                 .andExpect(jsonPath("$.message").value("Request body is missing or malformed"))
                 .andExpect(jsonPath("$.errors").isEmpty());
+    }
+
+    @TestConfiguration
+    static class TestHttpClientConfiguration {
+
+        @Bean
+        @Primary
+        SourceHttpClient sourceHttpClient() {
+            return request -> new SourceHttpResponse(
+                    200,
+                    Map.of(),
+                    rssFixture().getBytes(StandardCharsets.UTF_8)
+            );
+        }
+
+        private static String rssFixture() {
+            return """
+                    <?xml version="1.0" encoding="UTF-8" ?>
+                    <rss version="2.0">
+                      <channel>
+                        <title>Fixture Feed</title>
+                        <item>
+                          <title>First item</title>
+                          <link>https://example.com/news/1</link>
+                          <description>First summary</description>
+                          <author>editor@example.com</author>
+                          <pubDate>Sat, 06 Jun 2026 06:00:00 GMT</pubDate>
+                          <guid>item-1</guid>
+                        </item>
+                      </channel>
+                    </rss>
+                    """;
+        }
     }
 }

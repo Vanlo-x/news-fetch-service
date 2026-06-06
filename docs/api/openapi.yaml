@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: news-fetch-service API
   version: 0.0.1
-  description: Initial API skeleton for news-fetch-service.
+  description: API for fetching normalized news from configured RSS sources.
 paths:
   /health:
     get:
@@ -16,8 +16,8 @@ paths:
                 $ref: "#/components/schemas/HealthResponse"
   /v1/news/fetch:
     post:
-      summary: Placeholder news fetch endpoint
-      description: Returns an empty placeholder response. Real news fetching is not implemented in this milestone.
+      summary: Fetch news from configured RSS sources
+      description: Fetches enabled RSS sources, parses RSS/Atom feeds, and returns normalized NewsItem records. Retry, fallback, cache, deduplication, and source status are not implemented yet.
       requestBody:
         required: true
         content:
@@ -26,7 +26,7 @@ paths:
               $ref: "#/components/schemas/FetchNewsRequest"
       responses:
         "200":
-          description: Placeholder fetch response.
+          description: Fetch response.
           content:
             application/json:
               schema:
@@ -49,7 +49,7 @@ components:
           example: ok
     FetchNewsRequest:
       type: object
-      description: All filters are optional. Missing or empty sourceIds means all enabled sources in later milestones.
+      description: All filters are optional. Missing or empty sourceIds means all enabled RSS sources.
       properties:
         sourceIds:
           type: array
@@ -58,7 +58,6 @@ components:
             type: string
             minLength: 1
             maxLength: 100
-            description: Must not be blank.
             pattern: "^[A-Za-z0-9_-]+$"
         category:
           type: string
@@ -77,6 +76,7 @@ components:
           format: int32
           minimum: 1
           maximum: 100
+          default: 20
     FetchNewsResponse:
       type: object
       required:
@@ -100,12 +100,78 @@ components:
             $ref: "#/components/schemas/FetchError"
     NewsItem:
       type: object
-      description: News item skeleton. Fields are reserved for later milestones.
-      additionalProperties: true
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+        sourceId:
+          type: string
+        sourceName:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        fetchedAt:
+          type: string
+          format: date-time
+        summary:
+          type: string
+          nullable: true
+        content:
+          type: string
+          nullable: true
+        author:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        fingerprint:
+          type: string
+        qualityScore:
+          type: number
+          format: double
+          nullable: true
+        raw:
+          type: object
+          additionalProperties: true
     FetchError:
       type: object
-      description: Fetch error skeleton. Fields are reserved for later milestones.
-      additionalProperties: true
+      properties:
+        sourceId:
+          type: string
+        stage:
+          type: string
+          example: FETCH
+        code:
+          type: string
+          example: HTTP_STATUS
+        message:
+          type: string
+        retryable:
+          type: boolean
+        occurredAt:
+          type: string
+          format: date-time
     ApiErrorResponse:
       type: object
       required:

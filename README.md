@@ -1,8 +1,8 @@
 # news-fetch-service
 
-Spring Boot service skeleton for fetching and normalizing news data from configurable sources.
+Spring Boot service for fetching and normalizing news data from configurable sources.
 
-This milestone only provides the initial project structure, basic domain and DTO skeletons, a simple health endpoint, and a placeholder news fetch endpoint. It does not implement real news fetching, RSS parsing, fallback, caching, source status, or external network access.
+The current implementation supports real RSS fetching through configured sources. It does not implement JSON API sources, HTML sources, retry, fallback, caching, deduplication, source status, or final ranking.
 
 ## Tech Stack
 
@@ -48,7 +48,7 @@ news-fetch:
       retry-count: 0
 ```
 
-Current configuration loading only binds and validates source metadata. It does not connect to the source URL.
+Current configuration loading binds and validates source metadata. RSS sources are fetched only when `/v1/news/fetch` is called.
 
 Configuration rules:
 
@@ -67,7 +67,7 @@ Configuration rules:
 
 ## Restricted Source HTTP Client
 
-The infrastructure layer includes a restricted source HTTP client for future RSS/API adapters. It is not wired into `/v1/news/fetch` yet.
+The infrastructure layer includes a restricted source HTTP client used by the RSS adapter.
 
 Current behavior:
 
@@ -77,7 +77,7 @@ Current behavior:
 * Enforces `max-response-bytes` while reading the response.
 * Does not follow redirects.
 * Drops sensitive outbound headers: `Authorization`, `Cookie`, and `Proxy-Authorization`.
-* Does not parse RSS, normalize news, retry, fallback, or cache.
+* Does not retry, fallback, cache, or deduplicate.
 
 ## Run Locally
 
@@ -105,29 +105,30 @@ Expected response:
 {"status":"ok"}
 ```
 
-The placeholder news fetch API is also available:
+The RSS news fetch API is also available:
 
 ```bash
 curl -X POST http://localhost:8080/v1/news/fetch \
   -H "Content-Type: application/json" \
-  -d '{"sourceIds":["demo"],"category":"technology","language":"zh","region":"CN","limit":10}'
+  -d '{"sourceIds":["tech-rss"],"category":"technology","language":"zh","region":"CN","limit":10}'
 ```
 
-Expected placeholder response:
+Response shape:
 
 ```json
-{"status":"OK","items":[],"errors":[]}
+{"status":"OK","items":[...],"errors":[]}
 ```
 
 Current `/v1/news/fetch` request contract:
 
 * Request body is required.
 * All filters are optional.
-* `sourceIds` may contain up to 50 non-blank IDs using letters, numbers, underscores, and hyphens. Missing or empty means all enabled sources in later milestones.
+* `sourceIds` may contain up to 50 non-blank IDs using letters, numbers, underscores, and hyphens. Missing or empty means all enabled RSS sources.
 * `category` may contain letters, numbers, underscores, and hyphens.
 * `language` must be a lowercase two-letter language code, such as `zh` or `en`.
 * `region` must be an uppercase two-letter region code, such as `CN` or `US`.
-* `limit` must be between 1 and 100 when provided.
+* `limit` must be between 1 and 100 when provided. Missing `limit` defaults to `20`.
+* Current implementation supports only `RSS` sources. Explicitly requested non-RSS sources are returned as fetch errors.
 
 ## Run Tests
 
