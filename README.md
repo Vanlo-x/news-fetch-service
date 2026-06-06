@@ -2,7 +2,7 @@
 
 Spring Boot service for fetching and normalizing news data from configurable sources.
 
-The current implementation supports real RSS fetching through configured sources. It does not implement JSON API sources, HTML sources, retry, fallback, caching, deduplication, source status, or final ranking.
+The current implementation supports real RSS fetching through configured sources, plus request-level normalization and basic deduplication. It does not implement JSON API sources, HTML sources, retry, fallback, caching, persistent deduplication, source status, or final ranking.
 
 ## Tech Stack
 
@@ -77,7 +77,7 @@ Current behavior:
 * Enforces `max-response-bytes` while reading the response.
 * Does not follow redirects.
 * Drops sensitive outbound headers: `Authorization`, `Cookie`, and `Proxy-Authorization`.
-* Does not retry, fallback, cache, or deduplicate.
+* Does not own retry, fallback, cache, or deduplication behavior.
 
 ## Run Locally
 
@@ -137,6 +137,19 @@ Current `/v1/news/fetch` request contract:
 * `region` must be an uppercase two-letter region code, such as `CN` or `US`.
 * `limit` must be between 1 and 100 when provided. Missing `limit` defaults to `20`.
 * Current implementation supports only `RSS` sources. Explicitly requested non-RSS sources are returned as fetch errors.
+
+## Normalization And Deduplication
+
+Fetched RSS items are normalized before the response is limited:
+
+* Text fields are trimmed and internal whitespace is collapsed.
+* URLs are normalized by lowercasing scheme/host, removing fragments, and normalizing paths.
+* `id` and `fingerprint` are regenerated after normalization.
+* If a normalized URL exists, fingerprint is based on that URL.
+* If URL is missing, fingerprint is based on normalized title and published time.
+* Duplicate fingerprints are removed while preserving the first item encountered in source order.
+
+Current deduplication is in-memory and request-scoped only. It is not persistent and does not use cache or storage.
 
 ## Run Tests
 

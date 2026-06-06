@@ -56,6 +56,26 @@ class FetchNewsUseCaseTest {
     }
 
     @Test
+    void deduplicatesItemsAcrossSourcesBeforeApplyingLimit() {
+        SourceHttpClient client = request -> new SourceHttpResponse(
+                200,
+                Map.of(),
+                singleItemWithUrl("Shared title", "https://example.com/shared#tracking").getBytes(StandardCharsets.UTF_8)
+        );
+        FetchNewsUseCase useCase = useCaseWithSources(
+                List.of(source("rss-a", SourceType.RSS, true), source("rss-b", SourceType.RSS, true)),
+                client
+        );
+
+        FetchNewsResponse response = useCase.fetch(new FetchNewsRequest(null, null, null, null, 20));
+
+        assertThat(response.status()).isEqualTo(FetchStatus.OK);
+        assertThat(response.items()).hasSize(1);
+        assertThat(response.items().getFirst().url()).isEqualTo("https://example.com/shared");
+    }
+
+
+    @Test
     void returnsFailedForUnknownSourceId() {
         FetchNewsUseCase useCase = useCaseWithSources(List.of(source("rss-a", SourceType.RSS, true)), successClient(twoItemRssFixture()));
 
@@ -93,7 +113,12 @@ class FetchNewsUseCaseTest {
                 new NewsFetchProperties(sources),
                 new SourceConfigValidator(new SourceUrlValidator())
         );
-        return new FetchNewsUseCase(registry, new RssSourceAdapter(client));
+        return new FetchNewsUseCase(
+                registry,
+                new RssSourceAdapter(client),
+                new NewsItemNormalizer(),
+                new NewsItemDeduplicator()
+        );
     }
 
     private static NewsFetchProperties.Source source(String id, SourceType type, boolean enabled) {
@@ -125,6 +150,10 @@ class FetchNewsUseCaseTest {
     }
 
     private static String singleItemRssFixture(String title) {
+        return singleItemWithUrl(title, "https://example.com/news/" + title);
+    }
+
+    private static String singleItemWithUrl(String title, String url) {
         return """
                 <?xml version="1.0" encoding="UTF-8" ?>
                 <rss version="2.0">
@@ -132,11 +161,11 @@ class FetchNewsUseCaseTest {
                     <title>Fixture Feed</title>
                     <item>
                       <title>%s</title>
-                      <link>https://example.com/news/%s</link>
+                      <link>%s</link>
                     </item>
                   </channel>
                 </rss>
-                """.formatted(title, title);
+                """.formatted(title, url);
     }
 
     private static String twoItemRssFixture() {

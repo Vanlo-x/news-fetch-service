@@ -106,10 +106,10 @@ public class RssSourceAdapter {
             String author = blankToNull(entry.getAuthor());
             String hashInput = sourceConfig.id() + "|" + nullToEmpty(url) + "|" + nullToEmpty(title)
                     + "|" + (publishedAt == null ? "" : publishedAt);
-            String fingerprint = sha256(hashInput);
+            String adapterId = sha256(hashInput);
 
             items.add(new NewsItem(
-                    fingerprint,
+                    adapterId,
                     title,
                     url,
                     sourceConfig.id(),
@@ -124,7 +124,7 @@ public class RssSourceAdapter {
                     sourceConfig.language(),
                     sourceConfig.region(),
                     List.of(),
-                    fingerprint,
+                    adapterId,
                     null,
                     rawMetadata(safeFeed, entry)
             ));

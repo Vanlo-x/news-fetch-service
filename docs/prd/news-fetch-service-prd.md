@@ -25,6 +25,7 @@ com.vanlo.newsfetch
 * Source URL 安全校验。
 * 受限 HTTP client。
 * RSS 真实拉取和 Rome RSS/Atom 解析。
+* 请求内标准化和基础去重。
 
 当前阶段仍不实现：
 
@@ -33,7 +34,6 @@ com.vanlo.newsfetch
 * retry。
 * fallback。
 * cache。
-* deduplication。
 * source status。
 * 最终排序。
 
@@ -65,7 +65,7 @@ domain/
   领域模型，如 NewsItem、SourceConfig、FetchError
 
 application/
-  业务入口和后续编排
+  业务入口、标准化、去重和后续编排
 
 adapters/
   不同来源适配器。当前实现 RSS adapter
@@ -113,7 +113,10 @@ raw
 * `sourceId`、`sourceName`、`category`、`language`、`region` 来自 `SourceConfig`。
 * `summary` 来自 description。
 * `author` 尽量读取 RSS/Atom author。
-* `id` 和 `fingerprint` 当前使用 `sourceId + url/title/publishedAt` 的稳定 SHA-256。
+* RSS adapter 会先生成临时 ID。
+* application 层标准化后重新生成 `id` 和 `fingerprint`。
+* 有 URL 时，`fingerprint` 基于规范化 URL。
+* 没有 URL 时，`fingerprint` 基于规范化 title 和 published time。
 * `raw` 只保存少量元数据，不保存完整原文。
 
 ### SourceConfig
@@ -200,6 +203,13 @@ occurredAt
 * 无 items 且有 errors：`FAILED`
 * 无 matched RSS 来源且无 errors：`OK`
 
+当前标准化和去重规则：
+
+* 文本字段会 trim，并折叠连续空白字符。
+* URL 会小写 scheme/host、移除 fragment、规范化 path。
+* 相同 fingerprint 的新闻只保留第一条。
+* 去重只在单次请求内生效，不持久化，不使用缓存。
+
 ## 7. 安全要求
 
 * 来源 URL 只允许 http / https。
@@ -216,12 +226,11 @@ occurredAt
 
 建议后续阶段：
 
-1. 标准化和基础去重。
-2. FetchOrchestrator。
-3. retry。
-4. fallback。
-5. cache。
-6. source status 和日志。
-7. DNS 解析后的安全校验。
-8. JSON API source adapter。
-9. 部署和运行文档。
+1. FetchOrchestrator。
+2. retry。
+3. fallback。
+4. cache。
+5. source status 和日志。
+6. DNS 解析后的安全校验。
+7. JSON API source adapter。
+8. 部署和运行文档。

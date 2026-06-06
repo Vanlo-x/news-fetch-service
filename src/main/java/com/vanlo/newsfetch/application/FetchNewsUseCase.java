@@ -25,10 +25,19 @@ public class FetchNewsUseCase {
 
     private final SourceConfigRegistry sourceConfigRegistry;
     private final RssSourceAdapter rssSourceAdapter;
+    private final NewsItemNormalizer newsItemNormalizer;
+    private final NewsItemDeduplicator newsItemDeduplicator;
 
-    public FetchNewsUseCase(SourceConfigRegistry sourceConfigRegistry, RssSourceAdapter rssSourceAdapter) {
+    public FetchNewsUseCase(
+            SourceConfigRegistry sourceConfigRegistry,
+            RssSourceAdapter rssSourceAdapter,
+            NewsItemNormalizer newsItemNormalizer,
+            NewsItemDeduplicator newsItemDeduplicator
+    ) {
         this.sourceConfigRegistry = sourceConfigRegistry;
         this.rssSourceAdapter = rssSourceAdapter;
+        this.newsItemNormalizer = newsItemNormalizer;
+        this.newsItemDeduplicator = newsItemDeduplicator;
     }
 
     public FetchNewsResponse fetch(FetchNewsRequest request) {
@@ -43,8 +52,12 @@ public class FetchNewsUseCase {
             errors.addAll(result.errors());
         }
 
+        List<NewsItem> normalizedItems = items.stream()
+                .map(newsItemNormalizer::normalize)
+                .toList();
+        List<NewsItem> deduplicatedItems = newsItemDeduplicator.deduplicate(normalizedItems);
         int limit = safeRequest.limit() == null ? DEFAULT_LIMIT : safeRequest.limit();
-        List<NewsItem> limitedItems = items.stream()
+        List<NewsItem> limitedItems = deduplicatedItems.stream()
                 .limit(limit)
                 .toList();
 
