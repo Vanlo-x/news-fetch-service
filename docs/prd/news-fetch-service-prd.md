@@ -30,13 +30,14 @@ com.vanlo.newsfetch
 * retryable 来源失败的基础重试。
 * 一层顺序 fallback。
 * source 级内存 cache。
+* source status 和基础日志。
 
 当前阶段仍不实现：
 
 * JSON API 来源。
 * HTML 来源。
 * 持久化 cache。
-* source status。
+* 持久化 source status。
 * retry backoff / jitter。
 * 递归 fallback 链。
 * 最终排序。
@@ -242,6 +243,18 @@ occurredAt
 * cache 中的 items 仍会在每次请求中经过标准化、去重、limit 和状态计算。
 * 当前不实现持久化缓存、容量淘汰、分布式缓存或缓存指标。
 
+当前 source status 和日志规则：
+
+* `GET /v1/news/sources/status` 返回所有已配置来源的最近状态。
+* `GET /v1/news/sources/{sourceId}/status` 返回单个来源的最近状态。
+* enabled 但尚未拉取的来源状态为 `UNKNOWN`。
+* disabled 来源状态为 `DISABLED`。
+* 每次来源执行后记录 health、lastFetchAt、lastSuccessAt、lastFailureAt、lastErrorCode、lastItemCount、lastDurationMs、lastCacheHit、lastFallbackUsed 和 lastResolvedSourceId。
+* 兜底成功时，主来源记录为 `DEGRADED`，兜底来源记录自己的执行状态。
+* 基础日志记录 sourceId、health、items、errors、durationMs、cacheHit、fallbackUsed、resolvedSourceId 和 errorCode。
+* 日志不记录 URL、headers、Authorization、Cookie、API keys、响应体或原文内容。
+* 当前状态只保存在进程内存中，服务重启后丢失。
+
 ## 7. 安全要求
 
 * 来源 URL 只允许 http / https。
@@ -258,10 +271,10 @@ occurredAt
 
 建议后续阶段：
 
-1. source status 和日志。
-2. retry backoff / jitter。
-3. recursive fallback / fallback policy。
-4. persistent/distributed cache。
+1. retry backoff / jitter。
+2. recursive fallback / fallback policy。
+3. persistent/distributed cache。
+4. persistent source status / metrics。
 5. DNS 解析后的安全校验。
 6. JSON API source adapter。
 7. HTML source adapter。

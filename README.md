@@ -2,7 +2,7 @@
 
 Spring Boot service for fetching and normalizing news data from configurable sources.
 
-The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, per-source retry for retryable failures, one-level fallback sources, and source-level in-memory caching. It does not implement JSON API sources, HTML sources, persistent cache storage, persistent deduplication, source status, backoff, recursive fallback chains, or final ranking.
+The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, per-source retry for retryable failures, one-level fallback sources, source-level in-memory caching, source status, and basic fetch logs. It does not implement JSON API sources, HTML sources, persistent cache storage, persistent status storage, persistent deduplication, backoff, recursive fallback chains, or final ranking.
 
 ## Tech Stack
 
@@ -61,6 +61,7 @@ Current configuration loading binds and validates source metadata. RSS sources a
 * Retry retryable source failures according to `retry-count`.
 * Try configured fallback sources when a source still fails without items.
 * Read and write source-level cache when `cache-ttl-seconds` is configured.
+* Record source status and basic fetch logs.
 * Merge source-level errors without failing the whole request.
 * Normalize fetched items.
 * Deduplicate request-local items.
@@ -93,6 +94,16 @@ Current cache behavior is in-memory and source-scoped:
 * Cache hit skips HTTP fetch, retry, and fallback for that source.
 * Fallback sources use their own cache entries.
 * Cached items are still normalized, deduplicated, limited, and status-calculated per request.
+
+Current source status behavior is in-memory:
+
+* `GET /v1/news/sources/status` returns all configured source statuses.
+* `GET /v1/news/sources/{sourceId}/status` returns one configured source status.
+* A source starts as `UNKNOWN` when enabled and not fetched yet.
+* Disabled sources are reported as `DISABLED`.
+* Fetches update last health, fetch time, success/failure time, item count, duration, cache hit, fallback use, resolved source id, and last error.
+* Successful fallback records the primary source as `DEGRADED` and the fallback source according to its own fetch result.
+* Status is process-local and is lost on restart.
 
 Configuration rules:
 
@@ -170,6 +181,13 @@ Response shape:
 
 ```json
 {"status":"OK","items":[...],"errors":[]}
+```
+
+Source status is available at:
+
+```bash
+curl http://localhost:8080/v1/news/sources/status
+curl http://localhost:8080/v1/news/sources/tech-rss/status
 ```
 
 Current `/v1/news/fetch` request contract:

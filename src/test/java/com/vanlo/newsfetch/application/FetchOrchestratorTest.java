@@ -5,6 +5,7 @@ import com.vanlo.newsfetch.config.NewsFetchProperties;
 import com.vanlo.newsfetch.config.SourceConfigRegistry;
 import com.vanlo.newsfetch.config.SourceConfigValidator;
 import com.vanlo.newsfetch.domain.FetchStatus;
+import com.vanlo.newsfetch.domain.SourceHealth;
 import com.vanlo.newsfetch.domain.SourceType;
 import com.vanlo.newsfetch.infrastructure.SourceHttpClient;
 import com.vanlo.newsfetch.infrastructure.SourceHttpResponse;
@@ -283,10 +284,11 @@ class FetchOrchestratorTest {
                 Map.of(),
                 singleItemRssFixture("Attempt " + attempts.incrementAndGet()).getBytes(StandardCharsets.UTF_8)
         );
-        FetchOrchestrator orchestrator = orchestratorWithSources(
+        TestOrchestrator testOrchestrator = testOrchestratorWithSources(
                 List.of(source("rss-a", SourceType.RSS, true, 0, List.of(), 60L)),
                 client
         );
+        FetchOrchestrator orchestrator = testOrchestrator.orchestrator();
 
         FetchOrchestrationResult firstResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
         FetchOrchestrationResult secondResult = orchestrator.fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
@@ -295,6 +297,24 @@ class FetchOrchestratorTest {
         assertThat(firstResult.items().getFirst().title()).isEqualTo("Attempt 1");
         assertThat(secondResult.items().getFirst().title()).isEqualTo("Attempt 1");
         assertThat(secondResult.errors()).isEmpty();
+        assertThat(testOrchestrator.sourceStatusRegistry().findBySourceId("rss-a").orElseThrow().lastCacheHit()).isTrue();
+    }
+
+    @Test
+    void recordsSourceStatusForSuccessfulFetch() {
+        TestOrchestrator testOrchestrator = testOrchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true, 0, List.of(), 60L)),
+                successClient(singleItemRssFixture("Status item"))
+        );
+
+        testOrchestrator.orchestrator().fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+
+        var status = testOrchestrator.sourceStatusRegistry().findBySourceId("rss-a").orElseThrow();
+        assertThat(status.health()).isEqualTo(SourceHealth.OK);
+        assertThat(status.lastSuccessAt()).isNotNull();
+        assertThat(status.lastFailureAt()).isNull();
+        assertThat(status.lastItemCount()).isEqualTo(1);
+        assertThat(status.lastResolvedSourceId()).isEqualTo("rss-a");
     }
 
     @Test
@@ -346,18 +366,58 @@ class FetchOrchestratorTest {
         assertThat(secondResult.items().getFirst().title()).isEqualTo("Cached fallback");
     }
 
+    @Test
+    void recordsSourceStatusForFallbackSuccess() {
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-primary")) {
+                return new SourceHttpResponse(500, Map.of(), new byte[0]);
+            }
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Fallback item").getBytes(StandardCharsets.UTF_8));
+        };
+        TestOrchestrator testOrchestrator = testOrchestratorWithSources(
+                List.of(
+                        source("rss-primary", SourceType.RSS, true, 0, List.of("rss-fallback")),
+                        source("rss-fallback", SourceType.RSS, true)
+                ),
+                client
+        );
+
+        testOrchestrator.orchestrator().fetch(new FetchNewsCommand(List.of("rss-primary"), null, null, null, 20));
+
+        var primaryStatus = testOrchestrator.sourceStatusRegistry().findBySourceId("rss-primary").orElseThrow();
+        var fallbackStatus = testOrchestrator.sourceStatusRegistry().findBySourceId("rss-fallback").orElseThrow();
+        assertThat(primaryStatus.health()).isEqualTo(SourceHealth.DEGRADED);
+        assertThat(primaryStatus.lastFallbackUsed()).isTrue();
+        assertThat(primaryStatus.lastResolvedSourceId()).isEqualTo("rss-fallback");
+        assertThat(primaryStatus.lastErrorCode()).isEqualTo("HTTP_STATUS");
+        assertThat(fallbackStatus.health()).isEqualTo(SourceHealth.OK);
+    }
+
     private static FetchOrchestrator orchestratorWithSources(List<NewsFetchProperties.Source> sources, SourceHttpClient client) {
+        return testOrchestratorWithSources(sources, client).orchestrator();
+    }
+
+    private static TestOrchestrator testOrchestratorWithSources(List<NewsFetchProperties.Source> sources, SourceHttpClient client) {
         SourceConfigRegistry registry = new SourceConfigRegistry(
                 new NewsFetchProperties(sources),
                 new SourceConfigValidator(new SourceUrlValidator())
         );
-        return new FetchOrchestrator(
+        InMemorySourceStatusRegistry sourceStatusRegistry = new InMemorySourceStatusRegistry(registry);
+        FetchOrchestrator orchestrator = new FetchOrchestrator(
                 registry,
                 List.of(new RssSourceAdapter(client)),
                 new NewsItemNormalizer(),
                 new NewsItemDeduplicator(),
-                new InMemorySourceFetchCache()
+                new InMemorySourceFetchCache(),
+                sourceStatusRegistry
         );
+        return new TestOrchestrator(orchestrator, sourceStatusRegistry);
+    }
+
+    private record TestOrchestrator(
+            FetchOrchestrator orchestrator,
+            InMemorySourceStatusRegistry sourceStatusRegistry
+    ) {
     }
 
     private static NewsFetchProperties.Source source(String id, SourceType type, boolean enabled) {

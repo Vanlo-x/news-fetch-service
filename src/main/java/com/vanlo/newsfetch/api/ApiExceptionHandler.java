@@ -31,4 +31,10 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ApiErrorResponse("BAD_REQUEST", "Request body is missing or malformed", List.of()));
     }
+
+    @ExceptionHandler(SourceStatusNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleSourceStatusNotFound(SourceStatusNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiErrorResponse("NOT_FOUND", exception.getMessage(), List.of()));
+    }
 }

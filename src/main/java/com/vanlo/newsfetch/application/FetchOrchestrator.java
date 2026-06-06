@@ -7,6 +7,9 @@ import com.vanlo.newsfetch.domain.FetchError;
 import com.vanlo.newsfetch.domain.FetchStatus;
 import com.vanlo.newsfetch.domain.NewsItem;
 import com.vanlo.newsfetch.domain.SourceConfig;
+import com.vanlo.newsfetch.domain.SourceHealth;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -19,24 +22,29 @@ import java.util.Optional;
 @Service
 public class FetchOrchestrator {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(FetchOrchestrator.class);
+
     private final SourceConfigRegistry sourceConfigRegistry;
     private final List<NewsSourceAdapter> sourceAdapters;
     private final NewsItemNormalizer newsItemNormalizer;
     private final NewsItemDeduplicator newsItemDeduplicator;
     private final SourceFetchCache sourceFetchCache;
+    private final SourceStatusRegistry sourceStatusRegistry;
 
     public FetchOrchestrator(
             SourceConfigRegistry sourceConfigRegistry,
             List<NewsSourceAdapter> sourceAdapters,
             NewsItemNormalizer newsItemNormalizer,
             NewsItemDeduplicator newsItemDeduplicator,
-            SourceFetchCache sourceFetchCache
+            SourceFetchCache sourceFetchCache,
+            SourceStatusRegistry sourceStatusRegistry
     ) {
         this.sourceConfigRegistry = sourceConfigRegistry;
         this.sourceAdapters = List.copyOf(sourceAdapters);
         this.newsItemNormalizer = newsItemNormalizer;
         this.newsItemDeduplicator = newsItemDeduplicator;
         this.sourceFetchCache = sourceFetchCache;
+        this.sourceStatusRegistry = sourceStatusRegistry;
     }
 
     public FetchOrchestrationResult fetch(FetchNewsCommand command) {
@@ -51,9 +59,9 @@ public class FetchOrchestrator {
                 continue;
             }
 
-            SourceFetchResult result = fetchWithCache(adapter.get(), sourceConfig);
-            fetchedItems.addAll(result.items());
-            errors.addAll(result.errors());
+            SourceExecutionResult executionResult = executeSource(adapter.get(), sourceConfig);
+            fetchedItems.addAll(executionResult.result().items());
+            errors.addAll(executionResult.result().errors());
         }
 
         List<NewsItem> normalizedItems = fetchedItems.stream()
@@ -67,25 +75,33 @@ public class FetchOrchestrator {
         return new FetchOrchestrationResult(status(limitedItems, errors), limitedItems, errors);
     }
 
-    private SourceFetchResult fetchWithCache(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+    private SourceExecutionResult executeSource(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+        Instant startedAt = Instant.now();
+        SourceExecutionResult executionResult = fetchWithCache(adapter, sourceConfig);
+        SourceExecutionResult timedResult = executionResult.withDuration(Duration.between(startedAt, Instant.now()).toMillis());
+        recordSourceStatus(sourceConfig, timedResult);
+        return timedResult;
+    }
+
+    private SourceExecutionResult fetchWithCache(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
         if (!cacheEnabled(sourceConfig)) {
             return fetchWithRetryAndFallback(adapter, sourceConfig);
         }
 
         Optional<SourceFetchResult> cachedResult = sourceFetchCache.get(sourceConfig.id());
         if (cachedResult.isPresent()) {
-            return cachedResult.get();
+            return new SourceExecutionResult(cachedResult.get(), true, false, sourceConfig.id(), 0);
         }
 
-        SourceFetchResult result = fetchWithRetryAndFallback(adapter, sourceConfig);
-        cacheSuccessfulResult(sourceConfig, result);
+        SourceExecutionResult result = fetchWithRetryAndFallback(adapter, sourceConfig);
+        cacheSuccessfulResult(sourceConfig, result.result());
         return result;
     }
 
-    private SourceFetchResult fetchWithRetryAndFallback(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+    private SourceExecutionResult fetchWithRetryAndFallback(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
         SourceFetchResult primaryResult = fetchWithRetry(adapter, sourceConfig);
         if (!shouldFallback(sourceConfig, primaryResult)) {
-            return primaryResult;
+            return new SourceExecutionResult(primaryResult, false, false, sourceConfig.id(), 0);
         }
 
         List<FetchError> errors = new ArrayList<>(primaryResult.errors());
@@ -96,14 +112,21 @@ public class FetchOrchestrator {
             }
 
             NewsSourceAdapter fallbackAdapter = adapterFor(fallbackSource.get()).orElseThrow();
-            SourceFetchResult fallbackResult = fetchSingleSourceWithCache(fallbackAdapter, fallbackSource.get());
+            SourceExecutionResult fallbackExecutionResult = executeFallbackSource(fallbackAdapter, fallbackSource.get());
+            SourceFetchResult fallbackResult = fallbackExecutionResult.result();
             errors.addAll(fallbackResult.errors());
             if (!fallbackResult.items().isEmpty()) {
-                return new SourceFetchResult(fallbackResult.items(), errors);
+                return new SourceExecutionResult(
+                        new SourceFetchResult(fallbackResult.items(), errors),
+                        false,
+                        true,
+                        fallbackSource.get().id(),
+                        0
+                );
             }
         }
 
-        return new SourceFetchResult(List.of(), errors);
+        return new SourceExecutionResult(new SourceFetchResult(List.of(), errors), false, false, sourceConfig.id(), 0);
     }
 
     private Optional<SourceConfig> fallbackSourceFor(SourceConfig primarySource, String fallbackSourceId, List<FetchError> errors) {
@@ -137,19 +160,27 @@ public class FetchOrchestrator {
                 && !result.errors().isEmpty();
     }
 
-    private SourceFetchResult fetchSingleSourceWithCache(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+    private SourceExecutionResult executeFallbackSource(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
+        Instant startedAt = Instant.now();
+        SourceExecutionResult executionResult = fetchSingleSourceWithCache(adapter, sourceConfig);
+        SourceExecutionResult timedResult = executionResult.withDuration(Duration.between(startedAt, Instant.now()).toMillis());
+        recordSourceStatus(sourceConfig, timedResult);
+        return timedResult;
+    }
+
+    private SourceExecutionResult fetchSingleSourceWithCache(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
         if (!cacheEnabled(sourceConfig)) {
-            return fetchWithRetry(adapter, sourceConfig);
+            return new SourceExecutionResult(fetchWithRetry(adapter, sourceConfig), false, false, sourceConfig.id(), 0);
         }
 
         Optional<SourceFetchResult> cachedResult = sourceFetchCache.get(sourceConfig.id());
         if (cachedResult.isPresent()) {
-            return cachedResult.get();
+            return new SourceExecutionResult(cachedResult.get(), true, false, sourceConfig.id(), 0);
         }
 
         SourceFetchResult result = fetchWithRetry(adapter, sourceConfig);
         cacheSuccessfulResult(sourceConfig, result);
-        return result;
+        return new SourceExecutionResult(result, false, false, sourceConfig.id(), 0);
     }
 
     private void cacheSuccessfulResult(SourceConfig sourceConfig, SourceFetchResult result) {
@@ -161,6 +192,75 @@ public class FetchOrchestrator {
     private static boolean cacheEnabled(SourceConfig sourceConfig) {
         Long cacheTtlSeconds = sourceConfig.cacheTtlSeconds();
         return cacheTtlSeconds != null && cacheTtlSeconds > 0;
+    }
+
+    private void recordSourceStatus(SourceConfig sourceConfig, SourceExecutionResult executionResult) {
+        SourceFetchResult result = executionResult.result();
+        FetchError firstError = result.errors().isEmpty() ? null : result.errors().getFirst();
+        SourceHealth health = sourceHealth(result, executionResult.fallbackUsed());
+        sourceStatusRegistry.record(new SourceStatusUpdate(
+                sourceConfig,
+                health,
+                Instant.now(),
+                result.items().size(),
+                executionResult.durationMs(),
+                executionResult.cacheHit(),
+                executionResult.fallbackUsed(),
+                executionResult.resolvedSourceId(),
+                firstError
+        ));
+        logSourceExecution(sourceConfig, executionResult, health, firstError);
+    }
+
+    private static SourceHealth sourceHealth(SourceFetchResult result, boolean fallbackUsed) {
+        if (!result.items().isEmpty() && fallbackUsed) {
+            return SourceHealth.DEGRADED;
+        }
+        if (!result.items().isEmpty() && result.errors().isEmpty()) {
+            return SourceHealth.OK;
+        }
+        if (!result.items().isEmpty()) {
+            return SourceHealth.DEGRADED;
+        }
+        if (!result.errors().isEmpty()) {
+            return SourceHealth.FAILED;
+        }
+        return SourceHealth.OK;
+    }
+
+    private static void logSourceExecution(
+            SourceConfig sourceConfig,
+            SourceExecutionResult executionResult,
+            SourceHealth health,
+            FetchError firstError
+    ) {
+        if (health == SourceHealth.FAILED) {
+            LOGGER.warn(
+                    "source_fetch_completed sourceId={} health={} items={} errors={} durationMs={} cacheHit={} fallbackUsed={} resolvedSourceId={} errorCode={}",
+                    sourceConfig.id(),
+                    health,
+                    executionResult.result().items().size(),
+                    executionResult.result().errors().size(),
+                    executionResult.durationMs(),
+                    executionResult.cacheHit(),
+                    executionResult.fallbackUsed(),
+                    executionResult.resolvedSourceId(),
+                    firstError == null ? null : firstError.code()
+            );
+            return;
+        }
+
+        LOGGER.info(
+                "source_fetch_completed sourceId={} health={} items={} errors={} durationMs={} cacheHit={} fallbackUsed={} resolvedSourceId={}",
+                sourceConfig.id(),
+                health,
+                executionResult.result().items().size(),
+                executionResult.result().errors().size(),
+                executionResult.durationMs(),
+                executionResult.cacheHit(),
+                executionResult.fallbackUsed(),
+                executionResult.resolvedSourceId()
+        );
     }
 
     private static SourceFetchResult fetchWithRetry(NewsSourceAdapter adapter, SourceConfig sourceConfig) {
@@ -258,5 +358,18 @@ public class FetchOrchestrator {
             return FetchStatus.FAILED;
         }
         return FetchStatus.OK;
+    }
+
+    private record SourceExecutionResult(
+            SourceFetchResult result,
+            boolean cacheHit,
+            boolean fallbackUsed,
+            String resolvedSourceId,
+            long durationMs
+    ) {
+
+        private SourceExecutionResult withDuration(long durationMs) {
+            return new SourceExecutionResult(result, cacheHit, fallbackUsed, resolvedSourceId, durationMs);
+        }
     }
 }

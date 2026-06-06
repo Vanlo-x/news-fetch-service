@@ -10,12 +10,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -141,6 +143,47 @@ class NewsFetchControllerTest {
                 .andExpect(jsonPath("$.status").value("BAD_REQUEST"))
                 .andExpect(jsonPath("$.message").value("Request body is missing or malformed"))
                 .andExpect(jsonPath("$.errors").isEmpty());
+    }
+
+    @Test
+    @DirtiesContext(methodMode = DirtiesContext.MethodMode.BEFORE_METHOD)
+    void sourceStatusReturnsUnknownBeforeFetch() throws Exception {
+        mockMvc.perform(get("/v1/news/sources/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sourceId").value("tech-rss"))
+                .andExpect(jsonPath("$[0].health").value("UNKNOWN"))
+                .andExpect(jsonPath("$[0].lastFetchAt").doesNotExist());
+    }
+
+    @Test
+    void sourceStatusReflectsSuccessfulFetch() throws Exception {
+        mockMvc.perform(post("/v1/news/fetch")
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "sourceIds": ["tech-rss"]
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/v1/news/sources/tech-rss/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sourceId").value("tech-rss"))
+                .andExpect(jsonPath("$.sourceName").value("Tech RSS"))
+                .andExpect(jsonPath("$.sourceType").value("RSS"))
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.health").value("OK"))
+                .andExpect(jsonPath("$.lastItemCount").value(1))
+                .andExpect(jsonPath("$.lastCacheHit").value(false))
+                .andExpect(jsonPath("$.lastFallbackUsed").value(false))
+                .andExpect(jsonPath("$.lastResolvedSourceId").value("tech-rss"));
+    }
+
+    @Test
+    void sourceStatusReturnsNotFoundForUnknownSource() throws Exception {
+        mockMvc.perform(get("/v1/news/sources/missing/status"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.status").value("NOT_FOUND"));
     }
 
     @TestConfiguration
