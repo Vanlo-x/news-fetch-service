@@ -15,8 +15,10 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -28,6 +30,7 @@ public class FetchOrchestrator {
     private final List<NewsSourceAdapter> sourceAdapters;
     private final NewsItemNormalizer newsItemNormalizer;
     private final NewsItemDeduplicator newsItemDeduplicator;
+    private final NewsItemSorter newsItemSorter;
     private final SourceFetchCache sourceFetchCache;
     private final SourceStatusRegistry sourceStatusRegistry;
 
@@ -36,6 +39,7 @@ public class FetchOrchestrator {
             List<NewsSourceAdapter> sourceAdapters,
             NewsItemNormalizer newsItemNormalizer,
             NewsItemDeduplicator newsItemDeduplicator,
+            NewsItemSorter newsItemSorter,
             SourceFetchCache sourceFetchCache,
             SourceStatusRegistry sourceStatusRegistry
     ) {
@@ -43,6 +47,7 @@ public class FetchOrchestrator {
         this.sourceAdapters = List.copyOf(sourceAdapters);
         this.newsItemNormalizer = newsItemNormalizer;
         this.newsItemDeduplicator = newsItemDeduplicator;
+        this.newsItemSorter = newsItemSorter;
         this.sourceFetchCache = sourceFetchCache;
         this.sourceStatusRegistry = sourceStatusRegistry;
     }
@@ -50,6 +55,7 @@ public class FetchOrchestrator {
     public FetchOrchestrationResult fetch(FetchNewsCommand command) {
         List<FetchError> errors = new ArrayList<>();
         List<SourceConfig> selectedSources = selectSources(command, errors);
+        Map<String, Integer> sourceOrder = sourceOrder(selectedSources);
         List<NewsItem> fetchedItems = new ArrayList<>();
 
         for (SourceConfig sourceConfig : selectedSources) {
@@ -62,17 +68,35 @@ public class FetchOrchestrator {
             SourceExecutionResult executionResult = executeSource(adapter.get(), sourceConfig);
             fetchedItems.addAll(executionResult.result().items());
             errors.addAll(executionResult.result().errors());
+            appendMissingSourceOrders(sourceOrder, executionResult.result().items());
         }
 
         List<NewsItem> normalizedItems = fetchedItems.stream()
                 .map(newsItemNormalizer::normalize)
                 .toList();
         List<NewsItem> deduplicatedItems = newsItemDeduplicator.deduplicate(normalizedItems);
-        List<NewsItem> limitedItems = deduplicatedItems.stream()
+        List<NewsItem> sortedItems = newsItemSorter.sort(deduplicatedItems, sourceOrder);
+        List<NewsItem> limitedItems = sortedItems.stream()
                 .limit(command.limit())
                 .toList();
 
         return new FetchOrchestrationResult(status(limitedItems, errors), limitedItems, errors);
+    }
+
+    private static Map<String, Integer> sourceOrder(List<SourceConfig> selectedSources) {
+        Map<String, Integer> sourceOrder = new LinkedHashMap<>();
+        for (SourceConfig sourceConfig : selectedSources) {
+            sourceOrder.putIfAbsent(sourceConfig.id(), sourceOrder.size());
+        }
+        return sourceOrder;
+    }
+
+    private static void appendMissingSourceOrders(Map<String, Integer> sourceOrder, List<NewsItem> items) {
+        for (NewsItem item : items) {
+            if (item.sourceId() != null) {
+                sourceOrder.putIfAbsent(item.sourceId(), sourceOrder.size());
+            }
+        }
     }
 
     private SourceExecutionResult executeSource(NewsSourceAdapter adapter, SourceConfig sourceConfig) {

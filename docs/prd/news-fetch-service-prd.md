@@ -31,6 +31,7 @@ com.vanlo.newsfetch
 * 一层顺序 fallback。
 * source 级内存 cache。
 * source status 和基础日志。
+* 基础确定性排序。
 
 当前阶段仍不实现：
 
@@ -40,7 +41,7 @@ com.vanlo.newsfetch
 * 持久化 source status。
 * retry backoff / jitter。
 * 递归 fallback 链。
-* 最终排序。
+* AI/质量评分排序。
 
 ## 3. 技术栈
 
@@ -214,6 +215,14 @@ occurredAt
 * URL 会小写 scheme/host、移除 fragment、规范化 path。
 * 相同 fingerprint 的新闻只保留第一条。
 * 去重只在单次请求内生效，不持久化，不使用缓存。
+
+当前排序规则：
+
+* 标准化和去重之后、limit 之前排序。
+* `publishedAt` 越新越靠前。
+* `publishedAt` 缺失的新闻排在有发布时间的新闻之后。
+* 发布时间相同或都缺失时，按来源配置顺序排序。
+* 仍相同则保持原始收集顺序。
 
 当前 retry 规则：
 

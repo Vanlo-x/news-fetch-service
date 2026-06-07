@@ -5,6 +5,7 @@ import com.vanlo.newsfetch.config.NewsFetchProperties;
 import com.vanlo.newsfetch.config.SourceConfigRegistry;
 import com.vanlo.newsfetch.config.SourceConfigValidator;
 import com.vanlo.newsfetch.domain.FetchStatus;
+import com.vanlo.newsfetch.domain.NewsItem;
 import com.vanlo.newsfetch.domain.SourceHealth;
 import com.vanlo.newsfetch.domain.SourceType;
 import com.vanlo.newsfetch.infrastructure.SourceHttpClient;
@@ -367,6 +368,67 @@ class FetchOrchestratorTest {
     }
 
     @Test
+    void sortsItemsBeforeApplyingLimit() {
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-a")) {
+                return new SourceHttpResponse(200, Map.of(), singleItemRssFixture(
+                        "Older item",
+                        "https://example.com/older",
+                        "Sat, 06 Jun 2026 01:00:00 GMT"
+                ).getBytes(StandardCharsets.UTF_8));
+            }
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture(
+                    "Newer item",
+                    "https://example.com/newer",
+                    "Sat, 06 Jun 2026 02:00:00 GMT"
+            ).getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true), source("rss-b", SourceType.RSS, true)),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(null, null, null, null, 1));
+
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().getFirst().title()).isEqualTo("Newer item");
+    }
+
+    @Test
+    void sortsFallbackItemsWithDiscoveredFallbackSourceOrder() {
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-primary")) {
+                return new SourceHttpResponse(500, Map.of(), new byte[0]);
+            }
+            if (request.url().contains("rss-other")) {
+                return new SourceHttpResponse(200, Map.of(), singleItemRssFixture(
+                        "Other item",
+                        "https://example.com/other",
+                        "Sat, 06 Jun 2026 01:00:00 GMT"
+                ).getBytes(StandardCharsets.UTF_8));
+            }
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture(
+                    "Fallback item",
+                    "https://example.com/fallback",
+                    "Sat, 06 Jun 2026 01:00:00 GMT"
+            ).getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(
+                        source("rss-primary", SourceType.RSS, true, 0, List.of("rss-fallback")),
+                        source("rss-other", SourceType.RSS, true),
+                        source("rss-fallback", SourceType.RSS, true)
+                ),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-primary", "rss-other"), null, null, null, 20));
+
+        assertThat(result.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(result.items()).extracting(NewsItem::sourceId).containsExactly("rss-other", "rss-fallback");
+    }
+
+    @Test
     void recordsSourceStatusForFallbackSuccess() {
         SourceHttpClient client = request -> {
             if (request.url().contains("rss-primary")) {
@@ -408,6 +470,7 @@ class FetchOrchestratorTest {
                 List.of(new RssSourceAdapter(client)),
                 new NewsItemNormalizer(),
                 new NewsItemDeduplicator(),
+                new NewsItemSorter(),
                 new InMemorySourceFetchCache(),
                 sourceStatusRegistry
         );
@@ -475,6 +538,22 @@ class FetchOrchestratorTest {
 
     private static String singleItemRssFixture(String title) {
         return singleItemWithUrl(title, "https://example.com/news/" + title);
+    }
+
+    private static String singleItemRssFixture(String title, String url, String pubDate) {
+        return """
+                <?xml version="1.0" encoding="UTF-8" ?>
+                <rss version="2.0">
+                  <channel>
+                    <title>Fixture Feed</title>
+                    <item>
+                      <title>%s</title>
+                      <link>%s</link>
+                      <pubDate>%s</pubDate>
+                    </item>
+                  </channel>
+                </rss>
+                """.formatted(title, url, pubDate);
     }
 
     private static String singleItemWithUrl(String title, String url) {

@@ -2,7 +2,7 @@
 
 Spring Boot service for fetching and normalizing news data from configurable sources.
 
-The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, per-source retry for retryable failures, one-level fallback sources, source-level in-memory caching, source status, and basic fetch logs. It does not implement JSON API sources, HTML sources, persistent cache storage, persistent status storage, persistent deduplication, backoff, recursive fallback chains, or final ranking.
+The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, deterministic result sorting, per-source retry for retryable failures, one-level fallback sources, source-level in-memory caching, source status, and basic fetch logs. It does not implement JSON API sources, HTML sources, persistent cache storage, persistent status storage, persistent deduplication, backoff, recursive fallback chains, or AI/quality ranking.
 
 ## Tech Stack
 
@@ -65,6 +65,7 @@ Current configuration loading binds and validates source metadata. RSS sources a
 * Merge source-level errors without failing the whole request.
 * Normalize fetched items.
 * Deduplicate request-local items.
+* Sort results by published time and source order.
 * Apply the response limit and calculate the response status.
 
 Current adapter support is limited to `RSS`. Future JSON API and HTML sources should be added as new `NewsSourceAdapter` implementations.
@@ -201,7 +202,7 @@ Current `/v1/news/fetch` request contract:
 * `limit` must be between 1 and 100 when provided. Missing `limit` defaults to `20`.
 * Current implementation supports only `RSS` sources. Explicitly requested non-RSS sources are returned as fetch errors.
 
-## Normalization And Deduplication
+## Normalization, Deduplication, And Sorting
 
 Fetched RSS items are normalized before the response is limited:
 
@@ -213,6 +214,13 @@ Fetched RSS items are normalized before the response is limited:
 * Duplicate fingerprints are removed while preserving the first item encountered in source order.
 
 Current deduplication is in-memory and request-scoped only. It is not persistent and is separate from source-level fetch caching.
+
+Current sorting is deterministic:
+
+* Items with newer `publishedAt` values are returned first.
+* Items without `publishedAt` are returned after items with timestamps.
+* When timestamps match, configured source order is used.
+* Remaining ties preserve original collection order.
 
 ## Run Tests
 
