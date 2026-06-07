@@ -1,15 +1,81 @@
 news-fetch:
   sources:
-    - id: bbc-news
-      name: BBC News
+    - id: hacker-news-rss
+      name: Hacker News
       type: RSS
       enabled: true
-      priority: 100
-      category: world
+      priority: 10
+      category: technology
       language: en
-      region: GB
-      url: https://feeds.bbci.co.uk/news/rss.xml
+      region: US
+      url: https://news.ycombinator.com/rss
       method: GET
       timeout-ms: 5000
       max-response-bytes: 1048576
       retry-count: 0
+      fallback-source-ids: []
+      cache-ttl-seconds: 600
+
+    - id: techcrunch-rss
+      name: TechCrunch
+      type: RSS
+      enabled: true
+      priority: 20
+      category: technology
+      language: en
+      region: US
+      url: https://techcrunch.com/feed/
+      method: GET
+      timeout-ms: 5000
+      max-response-bytes: 2097152
+      retry-count: 0
+      fallback-source-ids: []
+      cache-ttl-seconds: 600
+
+    - id: the-verge-rss
+      name: The Verge
+      type: RSS
+      enabled: true
+      priority: 30
+      category: technology
+      language: en
+      region: US
+      url: https://www.theverge.com/rss/index.xml
+      method: GET
+      timeout-ms: 5000
+      max-response-bytes: 2097152
+      retry-count: 0
+      fallback-source-ids: []
+      cache-ttl-seconds: 600
+
+    - id: ars-technica-rss
+      name: Ars Technica
+      type: RSS
+      enabled: true
+      priority: 40
+      category: technology
+      language: en
+      region: US
+      url: https://feeds.arstechnica.com/arstechnica/index
+      method: GET
+      timeout-ms: 5000
+      max-response-bytes: 2097152
+      retry-count: 0
+      fallback-source-ids: []
+      cache-ttl-seconds: 600
+
+    - id: bbc-business-rss
+      name: BBC Business
+      type: RSS
+      enabled: true
+      priority: 50
+      category: business
+      language: en
+      region: GB
+      url: https://feeds.bbci.co.uk/news/business/rss.xml
+      method: GET
+      timeout-ms: 5000
+      max-response-bytes: 2097152
+      retry-count: 0
+      fallback-source-ids: []
+      cache-ttl-seconds: 600

@@ -150,13 +150,19 @@ On macOS or Linux:
 ./mvnw spring-boot:run
 ```
 
-To run with the sample real RSS source:
+To run with verified real RSS sources:
 
 ```powershell
 .\mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-The `local` profile configures `bbc-news` with `https://feeds.bbci.co.uk/news/rss.xml`.
+The `local` profile configures these RSS sources:
+
+* `hacker-news-rss` - `https://news.ycombinator.com/rss`
+* `techcrunch-rss` - `https://techcrunch.com/feed/`
+* `the-verge-rss` - `https://www.theverge.com/rss/index.xml`
+* `ars-technica-rss` - `https://feeds.arstechnica.com/arstechnica/index`
+* `bbc-business-rss` - `https://feeds.bbci.co.uk/news/business/rss.xml`
 
 After startup, verify the service:
 
@@ -175,7 +181,7 @@ The RSS news fetch API is also available:
 ```bash
 curl -X POST http://localhost:8080/v1/news/fetch \
   -H "Content-Type: application/json" \
-  -d '{"sourceIds":["tech-rss"],"category":"technology","language":"zh","region":"CN","limit":10}'
+  -d '{"sourceIds":["hacker-news-rss","techcrunch-rss","the-verge-rss","ars-technica-rss","bbc-business-rss"],"limit":10}'
 ```
 
 Response shape:
