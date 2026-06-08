@@ -1,0 +1,14 @@
+### 拉取新闻
+POST http://localhost:8080/v1/news/fetch
+Content-Type: application/json
+
+{
+  "sourceIds": [
+    "hacker-news-rss",
+    "techcrunch-rss",
+    "the-verge-rss",
+    "ars-technica-rss",
+    "bbc-business-rss"
+  ],
+  "limit": 10
+}

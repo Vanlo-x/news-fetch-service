@@ -1,11 +1,14 @@
 package com.vanlo.newsfetch.application;
 
+import com.vanlo.newsfetch.adapters.NewsSourceAdapter;
 import com.vanlo.newsfetch.adapters.RssSourceAdapter;
+import com.vanlo.newsfetch.adapters.SourceFetchResult;
 import com.vanlo.newsfetch.config.NewsFetchProperties;
 import com.vanlo.newsfetch.config.SourceConfigRegistry;
 import com.vanlo.newsfetch.config.SourceConfigValidator;
 import com.vanlo.newsfetch.domain.FetchStatus;
 import com.vanlo.newsfetch.domain.NewsItem;
+import com.vanlo.newsfetch.domain.SourceConfig;
 import com.vanlo.newsfetch.domain.SourceHealth;
 import com.vanlo.newsfetch.domain.SourceType;
 import com.vanlo.newsfetch.infrastructure.SourceHttpClient;
@@ -14,8 +17,11 @@ import com.vanlo.newsfetch.infrastructure.SourceUrlValidator;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +60,64 @@ class FetchOrchestratorTest {
         assertThat(result.status()).isEqualTo(FetchStatus.PARTIAL);
         assertThat(result.items()).hasSize(1);
         assertThat(result.errors()).hasSize(1);
+    }
+
+    @Test
+    void fetchesSelectedSourcesConcurrently() {
+        CountDownLatch fastSourceStarted = new CountDownLatch(1);
+        SourceHttpClient client = request -> {
+            if (request.url().contains("rss-slow")) {
+                if (!await(fastSourceStarted)) {
+                    return new SourceHttpResponse(500, Map.of(), new byte[0]);
+                }
+                return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Slow item").getBytes(StandardCharsets.UTF_8));
+            }
+
+            fastSourceStarted.countDown();
+            return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Fast item").getBytes(StandardCharsets.UTF_8));
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSources(
+                List.of(source("rss-slow", SourceType.RSS, true), source("rss-fast", SourceType.RSS, true)),
+                client
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(List.of("rss-slow", "rss-fast"), null, null, null, 20));
+
+        assertThat(result.status()).isEqualTo(FetchStatus.OK);
+        assertThat(result.errors()).isEmpty();
+        assertThat(result.items()).extracting(NewsItem::title).containsExactlyInAnyOrder("Slow item", "Fast item");
+    }
+
+    @Test
+    void isolatesUnexpectedSourceExceptions() {
+        NewsSourceAdapter adapter = new NewsSourceAdapter() {
+            @Override
+            public boolean supports(SourceType sourceType) {
+                return sourceType == SourceType.RSS;
+            }
+
+            @Override
+            public SourceFetchResult fetch(SourceConfig sourceConfig) {
+                if (sourceConfig.id().equals("rss-a")) {
+                    throw new IllegalStateException("boom");
+                }
+                return new SourceFetchResult(List.of(newsItem("Recovered item", sourceConfig)), List.of());
+            }
+        };
+        FetchOrchestrator orchestrator = orchestratorWithSourcesAndAdapters(
+                List.of(source("rss-a", SourceType.RSS, true), source("rss-b", SourceType.RSS, true)),
+                List.of(adapter)
+        );
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(null, null, null, null, 20));
+
+        assertThat(result.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().getFirst().title()).isEqualTo("Recovered item");
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().getFirst().sourceId()).isEqualTo("rss-a");
+        assertThat(result.errors().getFirst().stage()).isEqualTo("SOURCE_FETCH");
+        assertThat(result.errors().getFirst().code()).isEqualTo("SOURCE_FETCH_EXCEPTION");
     }
 
     @Test
@@ -298,7 +362,83 @@ class FetchOrchestratorTest {
         assertThat(firstResult.items().getFirst().title()).isEqualTo("Attempt 1");
         assertThat(secondResult.items().getFirst().title()).isEqualTo("Attempt 1");
         assertThat(secondResult.errors()).isEmpty();
-        assertThat(testOrchestrator.sourceStatusRegistry().findBySourceId("rss-a").orElseThrow().lastCacheHit()).isTrue();
+        var status = testOrchestrator.sourceStatusRegistry().findBySourceId("rss-a").orElseThrow();
+        assertThat(status.lastCacheHit()).isTrue();
+        assertThat(status.lastStaleCacheHit()).isFalse();
+        assertThat(status.lastCacheAgeSeconds()).isNotNull();
+        assertThat(status.lastCacheRefreshedAt()).isNotNull();
+    }
+
+    @Test
+    void returnsStaleCacheWhenRefreshFailsAfterCacheExpiry() throws InterruptedException {
+        AtomicInteger attempts = new AtomicInteger();
+        SourceHttpClient client = request -> {
+            if (attempts.incrementAndGet() == 1) {
+                return new SourceHttpResponse(200, Map.of(), singleItemRssFixture("Cached item").getBytes(StandardCharsets.UTF_8));
+            }
+            return new SourceHttpResponse(500, Map.of(), new byte[0]);
+        };
+        TestOrchestrator testOrchestrator = testOrchestratorWithSources(
+                List.of(source("rss-a", SourceType.RSS, true, 0, List.of(), 1L)),
+                client
+        );
+
+        FetchOrchestrationResult firstResult = testOrchestrator.orchestrator()
+                .fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+        Thread.sleep(1100);
+        FetchOrchestrationResult secondResult = testOrchestrator.orchestrator()
+                .fetch(new FetchNewsCommand(List.of("rss-a"), null, null, null, 20));
+
+        assertThat(firstResult.status()).isEqualTo(FetchStatus.OK);
+        assertThat(secondResult.status()).isEqualTo(FetchStatus.PARTIAL);
+        assertThat(secondResult.items()).hasSize(1);
+        assertThat(secondResult.items().getFirst().title()).isEqualTo("Cached item");
+        assertThat(secondResult.errors()).hasSize(1);
+        assertThat(secondResult.errors().getFirst().code()).isEqualTo("HTTP_STATUS");
+
+        var status = testOrchestrator.sourceStatusRegistry().findBySourceId("rss-a").orElseThrow();
+        assertThat(status.health()).isEqualTo(SourceHealth.DEGRADED);
+        assertThat(status.lastCacheHit()).isTrue();
+        assertThat(status.lastStaleCacheHit()).isTrue();
+        assertThat(status.lastCacheAgeSeconds()).isGreaterThanOrEqualTo(1);
+        assertThat(status.lastCacheRefreshedAt()).isNotNull();
+    }
+
+    @Test
+    void limitsConcurrentSourceFetches() {
+        AtomicInteger activeFetches = new AtomicInteger();
+        AtomicInteger maxActiveFetches = new AtomicInteger();
+        NewsSourceAdapter adapter = new NewsSourceAdapter() {
+            @Override
+            public boolean supports(SourceType sourceType) {
+                return sourceType == SourceType.RSS;
+            }
+
+            @Override
+            public SourceFetchResult fetch(SourceConfig sourceConfig) {
+                int active = activeFetches.incrementAndGet();
+                maxActiveFetches.updateAndGet(current -> Math.max(current, active));
+                try {
+                    Thread.sleep(100);
+                    return new SourceFetchResult(List.of(newsItem("Item " + sourceConfig.id(), sourceConfig)), List.of());
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return new SourceFetchResult(List.of(), List.of());
+                } finally {
+                    activeFetches.decrementAndGet();
+                }
+            }
+        };
+        List<NewsFetchProperties.Source> sources = java.util.stream.IntStream.range(0, 12)
+                .mapToObj(index -> source("rss-" + index, SourceType.RSS, true))
+                .toList();
+        FetchOrchestrator orchestrator = orchestratorWithSourcesAndAdapters(sources, List.of(adapter));
+
+        FetchOrchestrationResult result = orchestrator.fetch(new FetchNewsCommand(null, null, null, null, 20));
+
+        assertThat(result.status()).isEqualTo(FetchStatus.OK);
+        assertThat(result.items()).hasSize(12);
+        assertThat(maxActiveFetches.get()).isLessThanOrEqualTo(8);
     }
 
     @Test
@@ -460,6 +600,20 @@ class FetchOrchestratorTest {
     }
 
     private static TestOrchestrator testOrchestratorWithSources(List<NewsFetchProperties.Source> sources, SourceHttpClient client) {
+        return testOrchestratorWithSourcesAndAdapters(sources, List.of(new RssSourceAdapter(client)));
+    }
+
+    private static FetchOrchestrator orchestratorWithSourcesAndAdapters(
+            List<NewsFetchProperties.Source> sources,
+            List<NewsSourceAdapter> adapters
+    ) {
+        return testOrchestratorWithSourcesAndAdapters(sources, adapters).orchestrator();
+    }
+
+    private static TestOrchestrator testOrchestratorWithSourcesAndAdapters(
+            List<NewsFetchProperties.Source> sources,
+            List<NewsSourceAdapter> adapters
+    ) {
         SourceConfigRegistry registry = new SourceConfigRegistry(
                 new NewsFetchProperties(sources),
                 new SourceConfigValidator(new SourceUrlValidator())
@@ -467,7 +621,7 @@ class FetchOrchestratorTest {
         InMemorySourceStatusRegistry sourceStatusRegistry = new InMemorySourceStatusRegistry(registry);
         FetchOrchestrator orchestrator = new FetchOrchestrator(
                 registry,
-                List.of(new RssSourceAdapter(client)),
+                adapters,
                 new NewsItemNormalizer(),
                 new NewsItemDeduplicator(),
                 new NewsItemSorter(),
@@ -534,6 +688,38 @@ class FetchOrchestratorTest {
 
     private static SourceHttpClient successClient(String body) {
         return request -> new SourceHttpResponse(200, Map.of(), body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static boolean await(CountDownLatch latch) {
+        try {
+            return latch.await(2, TimeUnit.SECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private static NewsItem newsItem(String title, SourceConfig sourceConfig) {
+        return new NewsItem(
+                sourceConfig.id() + "-item",
+                title,
+                "https://example.com/news/" + title,
+                sourceConfig.id(),
+                sourceConfig.name(),
+                Instant.parse("2026-06-06T01:00:00Z"),
+                Instant.parse("2026-06-06T02:00:00Z"),
+                null,
+                null,
+                null,
+                null,
+                sourceConfig.category(),
+                sourceConfig.language(),
+                sourceConfig.region(),
+                List.of(),
+                sourceConfig.id() + "-fingerprint",
+                null,
+                Map.of()
+        );
     }
 
     private static String singleItemRssFixture(String title) {

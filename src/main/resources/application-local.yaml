@@ -10,7 +10,7 @@ news-fetch:
       region: US
       url: https://news.ycombinator.com/rss
       method: GET
-      timeout-ms: 5000
+      timeout-ms: 8000
       max-response-bytes: 1048576
       retry-count: 0
       fallback-source-ids: []
@@ -26,7 +26,7 @@ news-fetch:
       region: US
       url: https://techcrunch.com/feed/
       method: GET
-      timeout-ms: 5000
+      timeout-ms: 8000
       max-response-bytes: 2097152
       retry-count: 0
       fallback-source-ids: []
@@ -42,7 +42,7 @@ news-fetch:
       region: US
       url: https://www.theverge.com/rss/index.xml
       method: GET
-      timeout-ms: 5000
+      timeout-ms: 8000
       max-response-bytes: 2097152
       retry-count: 0
       fallback-source-ids: []
@@ -58,7 +58,7 @@ news-fetch:
       region: US
       url: https://feeds.arstechnica.com/arstechnica/index
       method: GET
-      timeout-ms: 5000
+      timeout-ms: 8000
       max-response-bytes: 2097152
       retry-count: 0
       fallback-source-ids: []
@@ -74,7 +74,7 @@ news-fetch:
       region: GB
       url: https://feeds.bbci.co.uk/news/business/rss.xml
       method: GET
-      timeout-ms: 5000
+      timeout-ms: 8000
       max-response-bytes: 2097152
       retry-count: 0
       fallback-source-ids: []

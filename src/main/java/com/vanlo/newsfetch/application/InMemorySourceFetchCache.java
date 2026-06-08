@@ -25,16 +25,20 @@ public class InMemorySourceFetchCache implements SourceFetchCache {
     }
 
     @Override
-    public Optional<SourceFetchResult> get(String sourceId) {
+    public Optional<CachedSourceFetchResult> get(String sourceId) {
         CachedSourceFetchResult entry = entries.get(sourceId);
         if (entry == null) {
             return Optional.empty();
         }
-        if (!entry.expiresAt().isAfter(clock.instant())) {
-            entries.remove(sourceId, entry);
+        if (entry.expiredAt(clock.instant())) {
             return Optional.empty();
         }
-        return Optional.of(entry.result());
+        return Optional.of(entry);
+    }
+
+    @Override
+    public Optional<CachedSourceFetchResult> getStale(String sourceId) {
+        return Optional.ofNullable(entries.get(sourceId));
     }
 
     @Override
@@ -42,12 +46,7 @@ public class InMemorySourceFetchCache implements SourceFetchCache {
         if (ttl == null || ttl.isZero() || ttl.isNegative()) {
             return;
         }
-        entries.put(sourceId, new CachedSourceFetchResult(result, clock.instant().plus(ttl)));
-    }
-
-    private record CachedSourceFetchResult(
-            SourceFetchResult result,
-            Instant expiresAt
-    ) {
+        Instant now = clock.instant();
+        entries.put(sourceId, new CachedSourceFetchResult(result, now, now.plus(ttl)));
     }
 }

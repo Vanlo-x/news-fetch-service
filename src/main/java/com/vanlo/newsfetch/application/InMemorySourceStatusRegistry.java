@@ -42,6 +42,9 @@ public class InMemorySourceStatusRegistry implements SourceStatusRegistry {
                 update.itemCount(),
                 update.durationMs(),
                 update.cacheHit(),
+                update.staleCacheHit(),
+                update.cacheAgeSeconds(),
+                update.cacheRefreshedAt(),
                 update.fallbackUsed(),
                 update.resolvedSourceId()
         ));
@@ -77,6 +80,9 @@ public class InMemorySourceStatusRegistry implements SourceStatusRegistry {
                 0,
                 0,
                 false,
+                false,
+                null,
+                null,
                 false,
                 null
         );

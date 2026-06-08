@@ -2,7 +2,7 @@
 
 Spring Boot service for fetching and normalizing news data from configurable sources.
 
-The current implementation supports real RSS fetching through configured sources, request-level normalization, basic deduplication, deterministic result sorting, per-source retry for retryable failures, one-level fallback sources, source-level in-memory caching, source status, and basic fetch logs. It does not implement JSON API sources, HTML sources, persistent cache storage, persistent status storage, persistent deduplication, backoff, recursive fallback chains, or AI/quality ranking.
+The current implementation supports real RSS fetching through configured sources, concurrent multi-source orchestration with a global concurrency cap, request-level normalization, basic deduplication, deterministic result sorting, per-source retry with basic backoff and jitter, one-level fallback sources, source-level in-memory caching with stale-cache fallback, source status, and basic fetch logs. It does not implement JSON API sources, HTML sources, persistent cache storage, persistent status storage, persistent deduplication, recursive fallback chains, asynchronous refresh jobs, article body extraction, article-level classification, or AI/quality ranking.
 
 ## Tech Stack
 
@@ -57,12 +57,13 @@ Current configuration loading binds and validates source metadata. RSS sources a
 
 * Select configured sources from request filters.
 * Resolve a source adapter by `SourceType`.
-* Fetch source items through the adapter.
+* Fetch selected sources concurrently through their adapters.
 * Retry retryable source failures according to `retry-count`.
 * Try configured fallback sources when a source still fails without items.
 * Read and write source-level cache when `cache-ttl-seconds` is configured.
+* Return stale cached items when live refresh fails after cache expiry.
 * Record source status and basic fetch logs.
-* Merge source-level errors without failing the whole request.
+* Merge source-level errors and isolate unexpected source exceptions without failing the whole request.
 * Normalize fetched items.
 * Deduplicate request-local items.
 * Sort results by published time and source order.
@@ -70,13 +71,19 @@ Current configuration loading binds and validates source metadata. RSS sources a
 
 Current adapter support is limited to `RSS`. Future JSON API and HTML sources should be added as new `NewsSourceAdapter` implementations.
 
+`POST /v1/news/fetch` always uses HTTP 200 for a successfully handled request and reports aggregate business outcome through the response body:
+
+* `OK`: returned items have no source-level errors, or no matched source had work to do.
+* `PARTIAL`: at least one item is available and at least one source-level error occurred.
+* `FAILED`: no items are available and at least one source-level error occurred.
+
 Current retry behavior is intentionally basic:
 
 * `retry-count` means additional attempts after the first attempt.
 * Only retryable source failures are retried.
 * A successful retry suppresses the earlier transient error from the API response.
 * Exhausted retries return the final failure.
-* No backoff, jitter, scheduling, or source status logging is implemented yet.
+* Retries use small synchronous backoff with jitter; asynchronous scheduling is not implemented yet.
 
 Current fallback behavior is also intentionally basic:
 
@@ -93,6 +100,7 @@ Current cache behavior is in-memory and source-scoped:
 * Only successful source results with items and no errors are cached.
 * Failed source results are not cached.
 * Cache hit skips HTTP fetch, retry, and fallback for that source.
+* If live refresh fails after cache expiry, stale cached items are returned with the live source errors, usually producing `PARTIAL`.
 * Fallback sources use their own cache entries.
 * Cached items are still normalized, deduplicated, limited, and status-calculated per request.
 
@@ -102,7 +110,7 @@ Current source status behavior is in-memory:
 * `GET /v1/news/sources/{sourceId}/status` returns one configured source status.
 * A source starts as `UNKNOWN` when enabled and not fetched yet.
 * Disabled sources are reported as `DISABLED`.
-* Fetches update last health, fetch time, success/failure time, item count, duration, cache hit, fallback use, resolved source id, and last error.
+* Fetches update last health, fetch time, success/failure time, item count, duration, cache hit, stale cache hit, cache age, cache refresh time, fallback use, resolved source id, and last error.
 * Successful fallback records the primary source as `DEGRADED` and the fallback source according to its own fetch result.
 * Status is process-local and is lost on restart.
 
@@ -136,6 +144,12 @@ Current behavior:
 * Drops sensitive outbound headers: `Authorization`, `Cookie`, and `Proxy-Authorization`.
 * Does not own retry, fallback, cache, or deduplication behavior.
 
+Fetch errors use specific codes where possible:
+
+* `CONNECT_TIMEOUT`, `READ_TIMEOUT`, `HTTP_CLIENT_ERROR`, `HTTP_IO_ERROR`, `HTTP_INTERRUPTED`
+* `RESPONSE_TOO_LARGE`, `UNSAFE_URL`, `UNSUPPORTED_HTTP_METHOD`
+* `HTTP_STATUS`, `RSS_PARSE_ERROR`, `SOURCE_FETCH_EXCEPTION`
+
 ## Run Locally
 
 On Windows:
@@ -155,6 +169,17 @@ To run with verified real RSS sources:
 ```powershell
 .\mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
 ```
+
+If your network requires an outbound proxy, set it in the same terminal that starts the service:
+
+```powershell
+$env:HTTPS_PROXY="http://127.0.0.1:7897"
+$env:HTTP_PROXY="http://127.0.0.1:7897"
+$env:NO_PROXY="localhost,127.0.0.1,::1"
+.\mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+When starting from IntelliJ IDEA, add the same variables in the Run Configuration environment variables. Environment variables set only in PowerShell are not automatically inherited by an already-open IDE.
 
 The `local` profile configures these RSS sources:
 
@@ -195,6 +220,13 @@ Source status is available at:
 ```bash
 curl http://localhost:8080/v1/news/sources/status
 curl http://localhost:8080/v1/news/sources/tech-rss/status
+```
+
+To build and run with Docker:
+
+```bash
+docker build -t news-fetch-service .
+docker run --rm -p 8080:8080 news-fetch-service
 ```
 
 Current `/v1/news/fetch` request contract:

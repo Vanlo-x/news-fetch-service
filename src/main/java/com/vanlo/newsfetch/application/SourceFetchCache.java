@@ -7,7 +7,9 @@ import java.util.Optional;
 
 public interface SourceFetchCache {
 
-    Optional<SourceFetchResult> get(String sourceId);
+    Optional<CachedSourceFetchResult> get(String sourceId);
+
+    Optional<CachedSourceFetchResult> getStale(String sourceId);
 
     void put(String sourceId, SourceFetchResult result, Duration ttl);
 }

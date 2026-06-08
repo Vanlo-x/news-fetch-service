@@ -13,6 +13,9 @@ public record SourceStatusUpdate(
         int itemCount,
         long durationMs,
         boolean cacheHit,
+        boolean staleCacheHit,
+        Long cacheAgeSeconds,
+        Instant cacheRefreshedAt,
         boolean fallbackUsed,
         String resolvedSourceId,
         FetchError error

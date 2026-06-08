@@ -17,7 +17,7 @@ paths:
   /v1/news/fetch:
     post:
       summary: Fetch news from configured RSS sources
-      description: Fetches enabled RSS sources, parses RSS/Atom feeds, and returns normalized NewsItem records. Retry, fallback, cache, deduplication, and source status are not implemented yet.
+      description: Fetches selected enabled RSS sources concurrently, parses RSS/Atom feeds, and returns normalized NewsItem records. The HTTP status only indicates request handling; aggregate business outcome is reported as OK, PARTIAL, or FAILED in the response body. Source-level retry, one-level fallback, in-memory source cache, request-local deduplication, deterministic sorting, and in-memory source status are supported.
       requestBody:
         required: true
         content:
@@ -37,6 +37,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiErrorResponse"
+  /v1/news/sources/status:
+    get:
+      summary: List configured source statuses
+      responses:
+        "200":
+          description: Source status list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SourceStatus"
+  /v1/news/sources/{sourceId}/status:
+    get:
+      summary: Get one configured source status
+      parameters:
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Source status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceStatus"
 components:
   schemas:
     HealthResponse:
@@ -164,6 +192,21 @@ components:
           example: FETCH
         code:
           type: string
+          enum:
+            - CONNECT_TIMEOUT
+            - READ_TIMEOUT
+            - HTTP_CLIENT_ERROR
+            - HTTP_IO_ERROR
+            - HTTP_INTERRUPTED
+            - RESPONSE_TOO_LARGE
+            - UNSAFE_URL
+            - UNSUPPORTED_HTTP_METHOD
+            - HTTP_STATUS
+            - RSS_PARSE_ERROR
+            - SOURCE_FETCH_EXCEPTION
+            - SOURCE_NOT_FOUND
+            - SOURCE_DISABLED
+            - UNSUPPORTED_SOURCE_TYPE
           example: HTTP_STATUS
         message:
           type: string
@@ -172,6 +215,70 @@ components:
         occurredAt:
           type: string
           format: date-time
+    SourceStatus:
+      type: object
+      properties:
+        sourceId:
+          type: string
+        sourceName:
+          type: string
+        sourceType:
+          type: string
+          enum:
+            - RSS
+            - API
+            - HTML
+        enabled:
+          type: boolean
+        health:
+          type: string
+          enum:
+            - UNKNOWN
+            - OK
+            - DEGRADED
+            - FAILED
+            - DISABLED
+        lastFetchAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastFailureAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastErrorCode:
+          type: string
+          nullable: true
+        lastErrorMessage:
+          type: string
+          nullable: true
+        lastItemCount:
+          type: integer
+          format: int32
+        lastDurationMs:
+          type: integer
+          format: int64
+        lastCacheHit:
+          type: boolean
+        lastStaleCacheHit:
+          type: boolean
+        lastCacheAgeSeconds:
+          type: integer
+          format: int64
+          nullable: true
+        lastCacheRefreshedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastFallbackUsed:
+          type: boolean
+        lastResolvedSourceId:
+          type: string
+          nullable: true
     ApiErrorResponse:
       type: object
       required:

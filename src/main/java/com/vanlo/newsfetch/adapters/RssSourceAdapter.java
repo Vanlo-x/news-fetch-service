@@ -1,6 +1,8 @@
 package com.vanlo.newsfetch.adapters;
 
 import com.rometools.rome.feed.synd.SyndEntry;
+import com.rometools.rome.feed.synd.SyndCategory;
+import com.rometools.rome.feed.synd.SyndEnclosure;
 import com.rometools.rome.feed.synd.SyndFeed;
 import com.rometools.rome.feed.synd.SyndFeedImpl;
 import com.rometools.rome.io.SyndFeedInput;
@@ -26,6 +28,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.jdom2.Element;
 
 @Component
 public class RssSourceAdapter implements NewsSourceAdapter {
@@ -60,9 +63,9 @@ public class RssSourceAdapter implements NewsSourceAdapter {
             return new SourceFetchResult(List.of(), List.of(new FetchError(
                     sourceConfig.id(),
                     STAGE_FETCH,
-                    "HTTP_CLIENT_ERROR",
+                    exception.code(),
                     exception.getMessage(),
-                    true,
+                    exception.retryable(),
                     occurredAt
             )));
         }
@@ -111,6 +114,9 @@ public class RssSourceAdapter implements NewsSourceAdapter {
 
             String summary = entry.getDescription() == null ? null : blankToNull(entry.getDescription().getValue());
             String author = blankToNull(entry.getAuthor());
+            List<String> tags = tags(entry);
+            String category = tags.isEmpty() ? sourceConfig.category() : tags.getFirst();
+            String imageUrl = imageUrl(entry);
             String hashInput = sourceConfig.id() + "|" + nullToEmpty(url) + "|" + nullToEmpty(title)
                     + "|" + (publishedAt == null ? "" : publishedAt);
             String adapterId = sha256(hashInput);
@@ -126,11 +132,11 @@ public class RssSourceAdapter implements NewsSourceAdapter {
                     summary,
                     null,
                     author,
-                    null,
-                    sourceConfig.category(),
+                    imageUrl,
+                    category,
                     sourceConfig.language(),
                     sourceConfig.region(),
-                    List.of(),
+                    tags,
                     adapterId,
                     null,
                     rawMetadata(safeFeed, entry)
@@ -146,6 +152,34 @@ public class RssSourceAdapter implements NewsSourceAdapter {
         putIfPresent(raw, "entryUri", entry.getUri());
         putIfPresent(raw, "entryLink", entry.getLink());
         return raw;
+    }
+
+    private static List<String> tags(SyndEntry entry) {
+        return entry.getCategories()
+                .stream()
+                .map(SyndCategory::getName)
+                .map(RssSourceAdapter::blankToNull)
+                .filter(value -> value != null)
+                .distinct()
+                .toList();
+    }
+
+    private static String imageUrl(SyndEntry entry) {
+        for (SyndEnclosure enclosure : entry.getEnclosures()) {
+            String type = enclosure.getType();
+            String url = blankToNull(enclosure.getUrl());
+            if (url != null && type != null && type.toLowerCase().startsWith("image/")) {
+                return url;
+            }
+        }
+
+        for (Element element : entry.getForeignMarkup()) {
+            String name = element.getName();
+            if (("thumbnail".equals(name) || "content".equals(name)) && element.getAttributeValue("url") != null) {
+                return blankToNull(element.getAttributeValue("url"));
+            }
+        }
+        return null;
     }
 
     private static void putIfPresent(Map<String, Object> raw, String key, Object value) {

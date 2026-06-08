@@ -7,11 +7,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -40,7 +42,7 @@ public class RestrictedSourceHttpClient implements SourceHttpClient {
     public SourceHttpResponse fetch(SourceHttpRequest request) {
         SourceUrlValidationResult validation = sourceUrlValidator.validate(request.url());
         if (!validation.allowed()) {
-            throw new SourceHttpClientException("Unsafe source URL: " + validation.reason());
+            throw new SourceHttpClientException("UNSAFE_URL", "Unsafe source URL: " + validation.reason(), false);
         }
 
         HttpRequest httpRequest = buildRequest(request);
@@ -48,11 +50,15 @@ public class RestrictedSourceHttpClient implements SourceHttpClient {
             HttpResponse<InputStream> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
             byte[] body = readLimited(response.body(), request.maxResponseBytes());
             return new SourceHttpResponse(response.statusCode(), response.headers().map(), body);
+        } catch (HttpConnectTimeoutException exception) {
+            throw new SourceHttpClientException("CONNECT_TIMEOUT", "Source HTTP connect timed out", true, exception);
+        } catch (HttpTimeoutException exception) {
+            throw new SourceHttpClientException("READ_TIMEOUT", "Source HTTP request timed out", true, exception);
         } catch (IOException exception) {
-            throw new SourceHttpClientException("Source HTTP request failed: " + exception.getMessage(), exception);
+            throw new SourceHttpClientException("HTTP_IO_ERROR", "Source HTTP request failed: " + exception.getMessage(), true, exception);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new SourceHttpClientException("Source HTTP request interrupted", exception);
+            throw new SourceHttpClientException("HTTP_INTERRUPTED", "Source HTTP request interrupted", true, exception);
         }
     }
 
@@ -121,7 +127,7 @@ public class RestrictedSourceHttpClient implements SourceHttpClient {
         } else if ("GET".equals(method)) {
             builder.GET();
         } else {
-            throw new SourceHttpClientException("Unsupported HTTP method: " + method);
+            throw new SourceHttpClientException("UNSUPPORTED_HTTP_METHOD", "Unsupported HTTP method: " + method, false);
         }
 
         return builder.build();
@@ -154,7 +160,7 @@ public class RestrictedSourceHttpClient implements SourceHttpClient {
             while ((read = inputStream.read(buffer)) != -1) {
                 total += read;
                 if (total > maxResponseBytes) {
-                    throw new SourceHttpClientException("Source HTTP response exceeded size limit");
+                    throw new SourceHttpClientException("RESPONSE_TOO_LARGE", "Source HTTP response exceeded size limit", false);
                 }
                 outputStream.write(buffer, 0, read);
             }

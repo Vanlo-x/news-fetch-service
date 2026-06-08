@@ -16,6 +16,33 @@
 com.vanlo.newsfetch
 ```
 
+当前阶段能力（可读版）：
+* Spring Boot + Maven 项目骨架。
+* `/health` 健康检查。
+* `/v1/news/fetch` API 契约和基础参数校验。
+* 来源配置加载和校验。
+* Source URL 安全校验。
+* 受限 HTTP client。
+* RSS 真实拉取和 Rome RSS/Atom 解析。
+* 多来源并发拉取和单来源异常隔离。
+* 全局并发上限，避免一次请求同时打爆外部来源。
+* 请求内标准化和基础去重。
+* FetchOrchestrator 基础编排。
+* retryable 来源失败的基础重试、backoff 和 jitter。
+* 一层顺序 fallback。
+* source 级内存 cache 和 stale cache 兜底。
+* source status、缓存年龄、缓存刷新时间和基础日志。
+* 基础确定性排序。
+
+当前阶段仍不实现（可读版）：
+* JSON API 来源。
+* HTML 来源。
+* 持久化 cache。
+* 持久化 source status。
+* 异步刷新任务。
+* 递归 fallback 链。
+* 正文抽取、文章级精细分类、标签生成或 AI/质量评分排序。
+
 当前阶段已经具备：
 
 * Spring Boot + Maven 项目骨架。
@@ -39,7 +66,7 @@ com.vanlo.newsfetch
 * HTML 来源。
 * 持久化 cache。
 * 持久化 source status。
-* retry backoff / jitter。
+* 异步调度和异步刷新。
 * 递归 fallback 链。
 * AI/质量评分排序。
 
@@ -191,6 +218,20 @@ occurredAt
 
 ### POST /v1/news/fetch
 
+当前接口语义（可读版）：
+* 从配置的 enabled RSS 来源拉取新闻。
+* `sourceIds` 缺省或为空时使用所有 enabled RSS 来源；指定时只使用匹配的 enabled RSS 来源。
+* 多个选中来源会并发拉取，单个来源超时、失败或抛出异常只影响该来源。
+* HTTP 200 只表示服务成功处理请求；聚合结果通过响应体中的业务状态表达。
+* 有 items 且无 errors：`OK`。
+* 有 items 且有 errors：`PARTIAL`。
+* 无 items 且有 errors：`FAILED`。
+* 无 matched RSS 来源且无 errors：`OK`。
+* 当前 cache 是 source 级内存缓存；命中时跳过该来源的 HTTP fetch、retry 和 fallback，但返回 items 仍会参与本次请求的标准化、去重、排序、limit 和状态计算。
+* 当前 retry 在用户请求链路中使用轻量 backoff 和 jitter；不实现异步刷新任务。
+* 当实时刷新失败但存在过期成功缓存时，返回 stale cache items 并保留实时错误，通常得到 `PARTIAL`。
+* 错误码会尽量区分 `CONNECT_TIMEOUT`、`READ_TIMEOUT`、`RESPONSE_TOO_LARGE`、`UNSAFE_URL`、`HTTP_STATUS`、`RSS_PARSE_ERROR` 和 `SOURCE_FETCH_EXCEPTION`。
+
 从配置的 RSS 来源拉取新闻。
 
 请求规则：
@@ -230,7 +271,7 @@ occurredAt
 * 只有无 items 且所有错误均为 `retryable=true` 时才重试。
 * 重试成功时，不在 API 响应中暴露中间失败。
 * 重试耗尽时，返回最后一次失败。
-* 当前不实现 backoff、jitter、异步调度或 source status 记录。
+* 当前实现轻量 backoff 和 jitter；不实现异步调度或异步刷新。
 
 当前 fallback 规则：
 
@@ -280,11 +321,11 @@ occurredAt
 
 建议后续阶段：
 
-1. retry backoff / jitter。
+1. async refresh job / scheduler。
 2. recursive fallback / fallback policy。
 3. persistent/distributed cache。
 4. persistent source status / metrics。
 5. DNS 解析后的安全校验。
 6. JSON API source adapter。
 7. HTML source adapter。
-8. 部署和运行文档。
+8. 更完整的部署和运行文档。

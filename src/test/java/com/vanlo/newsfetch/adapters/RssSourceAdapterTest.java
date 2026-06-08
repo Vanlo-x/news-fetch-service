@@ -28,6 +28,9 @@ class RssSourceAdapterTest {
         assertThat(result.items().getFirst().sourceId()).isEqualTo("rss-source");
         assertThat(result.items().getFirst().summary()).isEqualTo("First summary");
         assertThat(result.items().getFirst().fingerprint()).isNotBlank();
+        assertThat(result.items().getFirst().category()).isEqualTo("security");
+        assertThat(result.items().getFirst().tags()).containsExactly("security", "java");
+        assertThat(result.items().getFirst().imageUrl()).isEqualTo("https://example.com/image.jpg");
         assertThat(result.items().getFirst().raw()).containsEntry("feedTitle", "Fixture Feed");
     }
 
@@ -46,14 +49,15 @@ class RssSourceAdapterTest {
     @Test
     void returnsErrorForHttpClientFailure() {
         RssSourceAdapter adapter = new RssSourceAdapter(request -> {
-            throw new SourceHttpClientException("network failed");
+            throw new SourceHttpClientException("CONNECT_TIMEOUT", "network failed", true);
         });
 
         SourceFetchResult result = adapter.fetch(sourceConfig("rss-source"));
 
         assertThat(result.items()).isEmpty();
         assertThat(result.errors()).hasSize(1);
-        assertThat(result.errors().getFirst().code()).isEqualTo("HTTP_CLIENT_ERROR");
+        assertThat(result.errors().getFirst().code()).isEqualTo("CONNECT_TIMEOUT");
+        assertThat(result.errors().getFirst().retryable()).isTrue();
     }
 
     @Test
@@ -123,6 +127,9 @@ class RssSourceAdapterTest {
                       <link>https://example.com/news/1</link>
                       <description>First summary</description>
                       <author>editor@example.com</author>
+                      <category>security</category>
+                      <category>java</category>
+                      <enclosure url="https://example.com/image.jpg" type="image/jpeg" length="100" />
                       <pubDate>Sat, 06 Jun 2026 06:00:00 GMT</pubDate>
                       <guid>item-1</guid>
                     </item>

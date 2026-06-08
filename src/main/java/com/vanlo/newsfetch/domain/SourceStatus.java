@@ -16,6 +16,9 @@ public record SourceStatus(
         int lastItemCount,
         long lastDurationMs,
         boolean lastCacheHit,
+        boolean lastStaleCacheHit,
+        Long lastCacheAgeSeconds,
+        Instant lastCacheRefreshedAt,
         boolean lastFallbackUsed,
         String lastResolvedSourceId
 ) {

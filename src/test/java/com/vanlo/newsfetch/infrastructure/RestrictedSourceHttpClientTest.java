@@ -90,7 +90,9 @@ class RestrictedSourceHttpClientTest {
                 1024
         )))
                 .isInstanceOf(SourceHttpClientException.class)
-                .hasMessageContaining("Unsafe source URL");
+                .hasMessageContaining("Unsafe source URL")
+                .extracting("code", "retryable")
+                .containsExactly("UNSAFE_URL", false);
     }
 
     @Test
@@ -105,7 +107,9 @@ class RestrictedSourceHttpClientTest {
                 4
         )))
                 .isInstanceOf(SourceHttpClientException.class)
-                .hasMessageContaining("exceeded size limit");
+                .hasMessageContaining("exceeded size limit")
+                .extracting("code", "retryable")
+                .containsExactly("RESPONSE_TOO_LARGE", false);
     }
 
     @Test
@@ -138,7 +142,9 @@ class RestrictedSourceHttpClientTest {
                 1024
         )))
                 .isInstanceOf(SourceHttpClientException.class)
-                .hasMessageContaining("Unsupported HTTP method");
+                .hasMessageContaining("Unsupported HTTP method")
+                .extracting("code", "retryable")
+                .containsExactly("UNSUPPORTED_HTTP_METHOD", false);
     }
 
     private static void writeResponse(HttpExchange exchange, int statusCode, String body) throws IOException {

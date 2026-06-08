@@ -21,7 +21,11 @@ class InMemorySourceFetchCacheTest {
 
         cache.put("rss-a", result, Duration.ofSeconds(60));
 
-        assertThat(cache.get("rss-a")).contains(result);
+        assertThat(cache.get("rss-a")).hasValueSatisfying(cached -> {
+            assertThat(cached.result()).isEqualTo(result);
+            assertThat(cached.cachedAt()).isEqualTo(Instant.parse("2026-06-06T00:00:00Z"));
+            assertThat(cached.expiresAt()).isEqualTo(Instant.parse("2026-06-06T00:01:00Z"));
+        });
     }
 
     @Test
@@ -34,6 +38,7 @@ class InMemorySourceFetchCacheTest {
         clock.advance(Duration.ofSeconds(60));
 
         assertThat(cache.get("rss-a")).isEmpty();
+        assertThat(cache.getStale("rss-a")).hasValueSatisfying(cached -> assertThat(cached.result()).isEqualTo(result));
     }
 
     @Test
